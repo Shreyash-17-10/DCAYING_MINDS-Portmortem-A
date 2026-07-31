@@ -1,0 +1,24 @@
+[package]
+name = "cjson-rs"
+version = "0.1.0"
+edition = "2021"
+authors = ["Port Mortem 2026"]
+description = "Idiomatic Rust port of cJSON (MIT-licensed C JSON library by Dave Gamble)"
+license = "MIT"
+
+[lib]
+name = "cjson_rs"
+path = "src/lib.rs"
+# rlib: normal Rust dependency (used by tests/benches/fuzz targets written in Rust)
+# staticlib/cdylib: C-linkable, used by the differential-testing harness that
+# calls this port from C and compares output against the original cJSON.c.
+crate-type = ["rlib", "staticlib", "cdylib"]
+
+[dependencies]
+
+[[bench]]
+name = "parse_print"
+harness = false
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
