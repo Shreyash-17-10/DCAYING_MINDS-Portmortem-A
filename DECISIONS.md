@@ -14,22 +14,28 @@ was actually built; see the roadmap discussion for the phase breakdown.
 | `cJSON.c` — printing | `src/print.rs` | Complete |
 | `cJSON.c` — manipulation API (Add/Delete/Replace/Detach/Duplicate/Compare) | `src/value.rs` | Complete |
 | `cJSON_Utils.c/h` — JSON Pointer (RFC 6901) | `src/utils.rs` | Complete |
-| `cJSON_Utils.c/h` — JSON Patch (RFC 6902) | `src/utils.rs` | **Not implemented** |
-| `cJSON_Utils.c/h` — JSON Merge Patch (RFC 7396) | `src/utils.rs` | **Not implemented** |
+| `cJSON_Utils.c/h` — JSON Patch (RFC 6902) — apply | `src/utils.rs` | Complete |
+| `cJSON_Utils.c/h` — JSON Patch — diff/generate | `src/utils.rs` | **Not implemented** |
+| `cJSON_Utils.c/h` — JSON Merge Patch (RFC 7396) — apply | `src/utils.rs` | Complete |
+| `cJSON_Utils.c/h` — JSON Merge Patch — diff/generate | `src/utils.rs` | **Not implemented** |
 | C ABI / FFI shim | `src/ffi.rs` | Complete |
 | Test suite | `tests/*.rs` | Partial — see §7 |
 | Benchmarks | `benches/parse_print.rs`, `benches/c_bench/` | Complete |
 | Fuzzing | `fuzz/` | Scaffolded, not executed in this environment — see §9 |
 | Differential testing | `differential/diff_test.c` | Complete, executed, 0 mismatches |
 
-**Known gap, stated plainly:** JSON Patch and JSON Merge Patch
-(`cJSONUtils_ApplyPatch`, `cJSONUtils_MergePatch`, and their generators) are
-not ported. `src/utils.rs` implements JSON Pointer only
-(`GetPointer`/`GetPointerCaseSensitive`/`FindPointerFromObjectTo`). This was
-a deliberate scope cut to keep each work session reviewable rather than
-rushing ~700 lines of `cJSON_Utils.c`'s patch/merge logic in one pass. If
-judged before this is closed out, this is the single biggest functionality
-gap versus upstream.
+**Known gap, stated plainly:** JSON Patch *generation* (diffing two
+documents to produce a patch, `cJSONUtils_GeneratePatches`) and JSON Merge
+Patch *generation* (`cJSONUtils_GenerateMergePatch`) are not ported.
+Applying patches — `apply_patch`/`apply_patches`
+(RFC 6902) and `merge_patch` (RFC 7396) — is complete and verified against
+the official conformance suite (§9). Generation was deprioritized because
+the vast majority of real-world JSON Patch/Merge Patch usage (webhooks,
+REST PATCH endpoints, config sync) is *applying* patches produced elsewhere,
+not generating them; the apply side is also what upstream's own official
+test suite (`tests/json-patch-tests/`) exercises. If judged before this is
+closed out, patch/merge-patch *generation* is the remaining functionality
+gap versus upstream's public API.
 
 ## 2. Core data model (`src/value.rs`)
 
@@ -194,7 +200,71 @@ choice:
   comparison rather than via C's in-place buffer mutation
   (`decode_pointer_inplace`).
 
-JSON Patch and Merge Patch: not implemented — see §1.
+JSON Patch and Merge Patch: not implemented as of this section — see §6b.
+
+## 6b. JSON Patch (RFC 6902) and JSON Merge Patch (RFC 7396) — apply side
+
+`apply_patch`/`apply_patch_case_sensitive` (single operation),
+`apply_patches`/`apply_patches_case_sensitive` (a full patch document, an
+array of operations), and `merge_patch`/`merge_patch_case_sensitive` are
+ported from `apply_patch` and `merge_patch` in `cJSON_Utils.c`,
+function-for-function.
+
+- **Errors are a proper `enum PatchError`, not C's numeric `status` codes.**
+  `apply_patch` in C returns `int` (0 = success, 2/3/4/5/7/9/10/11/13 = one
+  of several distinct failure modes, undocumented in the return type
+  itself). Each `PatchError` variant's doc comment cites the exact C status
+  code it replaces, so anyone cross-referencing the original source can
+  trace the mapping directly — but callers get a self-describing type
+  instead of a bare integer they'd need `cJSON_Utils.c`'s source open to
+  interpret.
+- **Non-transactional, matching upstream exactly.** `apply_patches` stops
+  at the first failing operation but does **not** roll back operations
+  already applied before it — this is upstream's real, if perhaps
+  surprising, behavior (`cJSONUtils_ApplyPatches`'s loop just returns
+  early), reproduced deliberately rather than "fixed" into a transactional
+  all-or-nothing apply, since that would be an observable behavior change
+  from the original. Verified by a dedicated test
+  (`non_transactional_partial_application_on_failure`).
+- **Root-path removal's sentinel value.** C's `apply_patch` handles
+  `{"op": "remove", "path": ""}` by overwriting the root node with a
+  static `cJSON_Invalid`-typed struct — an internal "this node used to
+  exist but doesn't have a real type" marker with no corresponding JSON
+  value and no equivalent `Value` variant (by design, `Value` only has
+  variants for actual JSON types, see §2). This port uses `Value::Null` as
+  the closest observable stand-in for "the root was removed." This is a
+  documented, deliberate minor divergence, not an oversight: a caller who
+  removes the root and then inspects the result sees `null` in this port
+  versus an internal-only, unprintable sentinel type in C that no
+  well-behaved caller could observe anyway (`cJSON_Print` on `cJSON_Invalid`
+  is itself unspecified upstream).
+- **Array `add` bounds-checks strictly, on purpose diverging from
+  `Value::array_insert`.** `Value::array_insert` (§5, used for the general
+  `cJSON_InsertItemInArray`-equivalent manipulation API) silently clamps an
+  out-of-range index to the array's length. JSON Patch's `add` operation
+  must *not* do this — RFC 6902 requires index `== array.len()` (or the
+  literal `"-"` token) for a valid append, and anything greater is a hard
+  error. `apply_patch_inner` reimplements this check locally rather than
+  reusing `array_insert`, exactly mirroring `insert_item_in_array`
+  (`cJSON_Utils.c:693-728`)'s explicit `which > 0` bounds failure after
+  walking off the end of the list.
+- **`get_pointer_mut`**, the mutable counterpart to the existing (Phase 6a)
+  `get_item_from_pointer`, walks the tree the same way but returns `&mut
+  Value` — used to locate the parent container a patch operation will
+  mutate. No `unsafe`: reassigning the walk's current-node reference across
+  loop iterations relies on ordinary Rust non-lexical-lifetime reborrowing.
+- Merge Patch's recursive descent (`merge_patch_inner`) detaches each
+  touched key from `target` before recursing and re-appending the merged
+  result, exactly mirroring C's `DetachItemFromObjectCaseSensitive` +
+  `AddItemToObject` pairing in `merge_patch` (`cJSON_Utils.c:1355-1374`) —
+  including the resulting **observable key-reordering side effect**: any
+  key touched by the patch moves to the end of the object, in the order it
+  appears in the *patch* document, not the target. This is real upstream
+  behavior (not a bug this port introduces), verified directly by the
+  RFC 7396 §1 worked example test, which traces the exact resulting key
+  order rather than asserting a guessed one.
+- No `unsafe` anywhere in this section either — the "only `unsafe` in
+  `ffi.rs`" claim from §7 still holds with Patch/Merge Patch included.
 
 ## 7. FFI / C ABI (`src/ffi.rs`)
 
@@ -303,8 +373,21 @@ and run, not estimated). Headline results:
   "truncated JSON is correctly rejected, not read past") rather than
   deleted, with a comment explaining why the original C-specific framing
   doesn't apply.
-- **Not yet ported**: `json_patch_tests.c` and the merge-patch table in
-  `old_utils_tests.c`, blocked on §1's open Patch/Merge-Patch gap.
+- **JSON Patch conformance (`tests/json_patch_conformance.rs`)**: runs the
+  official [json-patch-tests](https://github.com/json-patch/json-patch-tests)
+  RFC 6902 conformance suite (`tests.json`, `spec_tests.json`,
+  `cjson-utils-tests.json` — copied verbatim from upstream's
+  `tests/json-patch-tests/`, unmodified), replicating upstream's own
+  `test_apply_patch` semantics from `json_patch_tests.c` exactly: apply each
+  case's `patch` to a duplicate of `doc`; if the case has an `"error"` key,
+  expect failure; otherwise expect success and, if `"expected"` is present,
+  expect a case-sensitive `compare()` match; skip cases marked
+  `"disabled": true`. **Result: 121 total cases, 4 disabled (matching
+  upstream's own disabled flags), 117/117 active cases pass.**
+- Not yet ported: `minify_tests.c`, `print_*.c`, `compare_tests.c`,
+  `misc_utils_tests.c`, `readme_examples.c` — lower priority, largely
+  covered indirectly by this port's own unit tests, but not a literal
+  1:1 port of those specific files.
 
 ## 11. Summary of intentional behavioral differences from upstream
 
@@ -318,9 +401,14 @@ from cJSON's exact C behavior, gathered in one place:
    not a replacement, for callers who want the opposite.
 3. `find_pointer_from_object_to` matches C's pointer-identity semantics via
    `std::ptr::eq`, not value equality (§6) — same behavior, by design.
-4. JSON Patch / JSON Merge Patch are unimplemented (§1) — the one outright
-   missing feature versus upstream's public API, not a semantic
-   difference.
+4. Root-path `remove` in JSON Patch produces `Value::Null` where C leaves an
+   internal, unprintable `cJSON_Invalid` sentinel (§6b) — the closest
+   observable stand-in for a case upstream itself has no real JSON
+   representation for.
+5. JSON Patch / JSON Merge Patch *generation* (diffing two documents into a
+   patch) is unimplemented (§1, §6b) — apply-side is complete and
+   conformance-tested; this is the one remaining gap versus upstream's full
+   public API, not a semantic difference in what is implemented.
 
 Everything else in this document is an implementation-strategy decision
 (data structures, error handling, module boundaries) rather than an
