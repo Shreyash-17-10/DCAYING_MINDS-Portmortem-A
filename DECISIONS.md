@@ -19,7 +19,7 @@ was actually built; see the roadmap discussion for the phase breakdown.
 | `cJSON_Utils.c/h` — JSON Merge Patch (RFC 7396) — apply | `src/utils.rs` | Complete |
 | `cJSON_Utils.c/h` — JSON Merge Patch — diff/generate | `src/utils.rs` | **Not implemented** |
 | C ABI / FFI shim | `src/ffi.rs` | Complete |
-| Test suite | `tests/*.rs` | Partial — see §7 |
+| Test suite | `tests/*.rs` | Complete — see §10 |
 | Benchmarks | `benches/parse_print.rs`, `benches/c_bench/` | Complete |
 | Fuzzing | `fuzz/` | Scaffolded, not executed in this environment — see §9 |
 | Differential testing | `differential/diff_test.c` | Complete, executed, 0 mismatches |
@@ -340,10 +340,11 @@ and run, not estimated). Headline results:
 
 ## 10. Test suite (`tests/`)
 
-- **106 tests total** at last count: 90 unit tests co-located with the
+- **131 tests total**: 112 unit tests co-located with the
   modules they test (`src/*.rs`, `#[cfg(test)]`), 15 in
-  `tests/parse_examples.rs`, 1 (13 assertions) in
-  `tests/json_pointer_examples.rs`.
+  `tests/parse_examples.rs`, 1 in
+  `tests/json_pointer_examples.rs`, and 3 in
+  `tests/json_patch_conformance.rs`.
 - `tests/fixtures/inputs/test1`..`test11` (and their `.expected`
   counterparts) are copied **verbatim, byte-for-byte, unmodified** from
   upstream `tests/inputs/`. Per the hackathon rule that changes to the
