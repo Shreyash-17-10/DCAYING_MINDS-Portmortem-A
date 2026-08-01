@@ -1,5 +1,5 @@
 //! Error types for cjson-rs.
-//! Filled in during Phase 2 (string/number primitives); extended in Phase 3 (parser).
+//! Contains the CJsonError enum used for parsing errors.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CJsonError {

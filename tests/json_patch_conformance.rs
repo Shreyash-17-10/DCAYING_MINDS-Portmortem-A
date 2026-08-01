@@ -1,129 +1,93 @@
-//! Integration test running the official JSON Patch (RFC 6902) conformance
-//! suite from https://github.com/json-patch/json-patch-tests, exactly as
-//! upstream cJSON's own tests/json_patch_tests.c does (`test_apply_patch`):
-//! for each case, apply `patch` to a duplicate of `doc` using
-//! `apply_patches_case_sensitive`; if the case has an `"error"` key, expect
-//! `apply_patches` to fail; otherwise expect it to succeed and, if
-//! `"expected"` is present, expect the result to `compare()`-equal it
-//! (case-sensitive, matching upstream's `cJSON_Compare(object, expected, true)`).
-//! Cases marked `"disabled": true` are skipped, exactly as upstream skips them.
+//! Integration tests executing the official RFC 6902 json-patch-tests suite.
 //!
-//! Fixture files (`tests.json`, `spec_tests.json`, `cjson-utils-tests.json`)
-//! are copied **verbatim, unmodified** from upstream's
-//! `tests/json-patch-tests/`.
+//! Replicates upstream's `test_apply_patch` semantics from `json_patch_tests.c`
+//! exactly: apply each case's `patch` to a duplicate of `doc`; if the case has
+//! an `"error"` key, expect failure; otherwise expect success and, if `"expected"`
+//! is present, expect a case-sensitive `compare()` match; skip cases marked
+//! `"disabled": true`.
 
 use cjson_rs::parse::parse;
 use cjson_rs::utils::apply_patches_case_sensitive;
-use cjson_rs::value::compare;
-use cjson_rs::value::Value;
+use cjson_rs::value::{compare, Value};
 use std::fs;
 use std::path::PathBuf;
 
-fn fixture_path(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+fn run_conformance_file(filename: &str) {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/json-patch-tests")
-        .join(name)
-}
+        .join(filename);
+    let content = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read fixture {filename} at {:?}: {e}", path));
+    let tests = parse(&content).unwrap_or_else(|e| panic!("failed to parse {filename}: {e:?}"));
 
-struct CaseResult {
-    comment: String,
-    passed: bool,
-    reason: String,
-}
+    let tests_arr = tests.as_array().expect("tests file must be a JSON array");
 
-fn run_suite(file: &str) -> Vec<CaseResult> {
-    let text = fs::read_to_string(fixture_path(file))
-        .unwrap_or_else(|e| panic!("failed to read {file}: {e}"));
-    let suite = parse(&text).unwrap_or_else(|e| panic!("failed to parse {file}: {e:?}"));
-    let cases = suite.as_array().unwrap_or_else(|| panic!("{file} is not a JSON array"));
+    let mut total_run = 0;
+    let mut total_skipped = 0;
 
-    let mut results = Vec::new();
-
-    for case in cases {
-        let comment = case
-            .object_get("comment")
-            .and_then(Value::as_str)
-            .unwrap_or("(no comment)")
-            .to_string();
-
-        if case.object_get("disabled").map(Value::is_true) == Some(true) {
-            continue; // matches upstream: disabled cases are skipped, not failed
+    for (idx, test) in tests_arr.iter().enumerate() {
+        // Skip cases marked "disabled": true
+        if test.object_get("disabled") == Some(&Value::Bool(true)) {
+            total_skipped += 1;
+            continue;
         }
 
-        let doc = match case.object_get("doc") {
-            Some(d) => d,
-            None => {
-                results.push(CaseResult { comment, passed: false, reason: "missing \"doc\"".into() });
-                continue;
-            }
-        };
-        let patch = match case.object_get("patch") {
-            Some(p) => p,
-            None => {
-                results.push(CaseResult { comment, passed: false, reason: "missing \"patch\"".into() });
-                continue;
-            }
-        };
+        let doc = test
+            .object_get("doc")
+            .expect("test must have a 'doc' field");
+        let patch = test
+            .object_get("patch")
+            .expect("test must have a 'patch' field");
 
-        let mut object = doc.duplicate(true);
-        let apply_result = apply_patches_case_sensitive(&mut object, patch);
+        let mut target = doc.duplicate(true);
+        let res = apply_patches_case_sensitive(&mut target, patch);
 
-        let expects_error = case.object_get("error").is_some();
-
-        let (passed, reason) = if expects_error {
-            match apply_result {
-                Err(_) => (true, String::new()),
-                Ok(()) => (false, "expected patch application to fail, but it succeeded".into()),
-            }
+        if test.object_has("error") {
+            assert!(
+                res.is_err(),
+                "Test case #{idx} ('{}') in {filename} was expected to fail, but succeeded.",
+                test.object_get("comment")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+            );
         } else {
-            match apply_result {
-                Err(e) => (false, format!("patch application failed unexpectedly: {e:?}")),
-                Ok(()) => match case.object_get("expected") {
-                    Some(expected) if !compare(&object, expected, true) => {
-                        (false, "result did not match \"expected\"".into())
-                    }
-                    _ => (true, String::new()),
-                },
+            assert!(
+                res.is_ok(),
+                "Test case #{idx} ('{}') in {filename} failed: {:?}",
+                test.object_get("comment")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(""),
+                res
+            );
+
+            if let Some(expected) = test.object_get("expected") {
+                assert!(
+                    compare(&target, expected, true),
+                    "Test case #{idx} ('{}') in {filename} mismatch.\nActual: {:?}\nExpected: {:?}",
+                    test.object_get("comment")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(""),
+                    target,
+                    expected
+                );
             }
-        };
-
-        results.push(CaseResult { comment, passed, reason });
-    }
-
-    results
-}
-
-fn assert_suite_passes(file: &str) {
-    let results = run_suite(file);
-    let total = results.len();
-    let failures: Vec<&CaseResult> = results.iter().filter(|r| !r.passed).collect();
-
-    if !failures.is_empty() {
-        let mut msg = format!(
-            "{file}: {}/{} cases failed\n",
-            failures.len(),
-            total
-        );
-        for f in &failures {
-            msg.push_str(&format!("  - \"{}\": {}\n", f.comment, f.reason));
         }
-        panic!("{msg}");
+        total_run += 1;
     }
-
-    println!("{file}: {total}/{total} cases passed");
+    println!("File {filename}: run {total_run}, skipped {total_skipped}");
 }
 
 #[test]
-fn spec_tests_json() {
-    assert_suite_passes("spec_tests.json");
+fn test_json_patch_conformance_tests() {
+    run_conformance_file("tests.json");
 }
 
 #[test]
-fn tests_json() {
-    assert_suite_passes("tests.json");
+fn test_json_patch_conformance_spec_tests() {
+    run_conformance_file("spec_tests.json");
 }
 
 #[test]
-fn cjson_utils_tests_json() {
-    assert_suite_passes("cjson-utils-tests.json");
+fn test_json_patch_conformance_cjson_utils_tests() {
+    run_conformance_file("cjson-utils-tests.json");
 }

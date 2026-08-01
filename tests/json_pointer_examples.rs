@@ -53,8 +53,8 @@ fn json_pointer_resolves_rfc6901_examples() {
 
     // These characters need no escaping in JSON Pointer.
     assert_eq!(get_pointer(&root, "/c%d"), root.object_get("c%d"));
-    assert_eq!(get_pointer(&root, "/c^f"), root.object_get("c^f"));
-    assert_eq!(get_pointer(&root, "/c|f"), root.object_get("c|f"));
+    assert_eq!(get_pointer(&root, "/e^f"), root.object_get("e^f"));
+    assert_eq!(get_pointer(&root, "/g|h"), root.object_get("g|h"));
     assert_eq!(get_pointer(&root, "/i\\j"), root.object_get("i\\j"));
     assert_eq!(get_pointer(&root, "/k\"l"), root.object_get("k\"l"));
     assert_eq!(get_pointer(&root, "/ "), root.object_get(" "));

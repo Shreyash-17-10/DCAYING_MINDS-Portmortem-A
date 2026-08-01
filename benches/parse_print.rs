@@ -66,16 +66,12 @@ fn bench_print(c: &mut Criterion) {
     for name in ["test1", "test5", "test10"] {
         let json = fixture(name);
         let value = parse(&json).unwrap();
-        group.bench_with_input(
-            BenchmarkId::new("formatted", name),
-            &value,
-            |b, value| b.iter(|| print(black_box(value)).unwrap()),
-        );
-        group.bench_with_input(
-            BenchmarkId::new("unformatted", name),
-            &value,
-            |b, value| b.iter(|| print_unformatted(black_box(value)).unwrap()),
-        );
+        group.bench_with_input(BenchmarkId::new("formatted", name), &value, |b, value| {
+            b.iter(|| print(black_box(value)).unwrap())
+        });
+        group.bench_with_input(BenchmarkId::new("unformatted", name), &value, |b, value| {
+            b.iter(|| print_unformatted(black_box(value)).unwrap())
+        });
     }
 
     for n in [100usize, 1_000, 10_000] {
