@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>cjson-rs — C vs Rust Differential Terminal GUI | Port Mortem 2026</title>
+    <meta name="description"
+        content="Split-screen terminal GUI comparing original C cJSON.c and idiomatic Rust cjson-rs port side-by-side for the Code Resurrection Hackathon.">
+    <!-- Google Fonts for crisp, authentic Monospace Terminal typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,600;0,700;1,400&family=Roboto+Mono:wght@400;500;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body class="crt-enabled">
+    <!-- Top Terminal Title Bar -->
+    <header class="terminal-titlebar">
+        <div class="titlebar-title">
+            <span class="prompt-user">portmortem@cjson-rs</span>:<span class="prompt-path">~/differential</span> — <span class="title-label">[ C vs Rust Differential Terminal ]</span>
+        </div>
+    </header>
+
+    <!-- Navigation Bar: Console Mode Selector -->
+    <nav class="console-nav" aria-label="Console Modes">
+        <div class="nav-tabs">
+            <button id="tab-diff" class="mode-tab active" data-mode="diff">
+                <span class="tab-key">[1]</span> PARSE &amp; PRINT DIFF
+            </button>
+            <button id="tab-ast" class="mode-tab" data-mode="ast">
+                <span class="tab-key">[2]</span> AST &amp; DATA MODEL
+            </button>
+            <button id="tab-memory" class="mode-tab" data-mode="memory">
+                <span class="tab-key">[3]</span> MEMORY &amp; SAFETY
+            </button>
+            <button id="tab-bench" class="mode-tab" data-mode="bench">
+                <span class="tab-key">[4]</span> BENCHMARK &amp; PERF
+            </button>
+            <button id="tab-code" class="mode-tab" data-mode="code">
+                <span class="tab-key">[5]</span> SOURCE CODE COMPAT
+            </button>
+        </div>
+        <div class="nav-status">
+            <span id="global-match-badge" class="badge-match">✔ 131/131 TESTS PASSING (100% BEHAVIORAL
+                EQUIVALENCE)</span>
+        </div>
+    </nav>
+
+    <!-- Controls Bar: Test Selector and Quick Actions -->
+    <section class="controls-bar">
+        <div class="selector-group">
+            <label for="test-case-selector" class="control-label">CORPUS FIXTURE:</label>
+            <select id="test-case-selector" aria-label="Select Test Case">
+                <!-- Populated dynamically by app.js -->
+            </select>
+        </div>
+        <div class="action-buttons">
+            <button id="btn-run-diff" class="btn-terminal btn-primary" title="Execute full 131-test verification suite">
+                ► Verify All 131 Tests
+            </button>
+            <button id="btn-custom-json" class="btn-terminal btn-action" title="Input custom JSON string">
+                + Custom JSON...
+            </button>
+            <button id="btn-toggle-scanlines" class="btn-terminal btn-toggle" title="Toggle retro CRT scanlines effect">
+                CRT Scanlines [ON]
+            </button>
+            <button id="btn-instant-render" class="btn-terminal btn-toggle" title="Toggle typewriter text speed">
+                Typewriter [ON]
+            </button>
+        </div>
+    </section>
+
+    <!-- Main Split-Screen Terminal Workspace -->
+    <main class="split-workspace">
+        <!-- LEFT PANEL: C Output (cJSON.c) -->
+        <section class="terminal-panel c-panel" id="panel-c">
+            <div class="panel-header">
+                <div class="panel-title">
+                    <span class="ascii-corner">┌──</span> C <span>
+
+                    </span>
+                </div>
+                <div class="panel-meta">
+                    <span class="tech-tag tag-c">C v1.7.18</span>
+                    <span id="c-status-badge" class="status-badge status-ok">[OK] PARSED</span>
+                </div>
+            </div>
+            <div class="console-body" id="c-console-body">
+                <div id="c-metrics" class="metrics-bar">
+                    <span>ALLOCS: <strong id="c-alloc-count">--</strong></span>
+                    <span>HEAP BYTES: <strong id="c-heap-bytes">--</strong></span>
+                    <span>EXEC TIME: <strong id="c-exec-time">--</strong></span>
+                </div>
+                <div class="output-viewport">
+                    <pre id="c-output-content" class="output-content" tabindex="0"></pre>
+                </div>
+            </div>
+            <div class="panel-footer">
+                <span class="ascii-corner">└──</span> <span class="footer-note"></span>
+            </div>
+        </section>
+
+        <!-- RIGHT PANEL: Rust Output (cjson-rs) -->
+        <section class="terminal-panel rust-panel" id="panel-rust">
+            <div class="panel-header">
+                <div class="panel-title">
+                    <span class="ascii-corner">┌──</span> RUST <span class="sub-title"></span>
+                </div>
+                <div class="panel-meta">
+                    <span class="tech-tag tag-rust">cjson-rs 1.0 (Rust 1.75+)</span>
+                    <span id="rust-status-badge" class="status-badge status-ok">[OK] PARSED</span>
+                </div>
+            </div>
+            <div class="console-body" id="rust-console-body">
+                <div id="rust-metrics" class="metrics-bar">
+                    <span>MEMORY: <strong id="rust-alloc-info">RAII Drop</strong></span>
+                    <span>SAFETY: <strong id="rust-safety-info">0 unsafe, Send+Sync</strong></span>
+                    <span>EXEC TIME: <strong id="rust-exec-time">--</strong></span>
+                </div>
+                <div class="output-viewport">
+                    <pre id="rust-output-content" class="output-content" tabindex="0"></pre>
+                </div>
+            </div>
+            <div class="panel-footer">
+                <span class="ascii-corner">└──</span> <span class="footer-note"></span>
+            </div>
+        </section>
+    </main>
+
+    <!-- Custom JSON Editor Modal (Hidden by default) -->
+    <div id="custom-json-modal" class="modal-overlay hidden" role="dialog" aria-labelledby="modal-title"
+        aria-modal="true">
+        <div class="modal-window">
+            <div class="modal-header">
+                <span id="modal-title" class="modal-title">┌── LIVE DIFFERENTIAL JSON TESTING CONSOLE</span>
+                <button id="btn-close-modal" class="btn-terminal btn-close-modal" aria-label="Close modal">[X]</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-desc">
+                    Type or paste any valid or invalid JSON document below. Both the C (<code>cJSON.c</code>) and Rust
+                    (<code>cjson-rs</code>)
+                    parsers will evaluate it simultaneously and report AST structure, formatted output, or parse
+                    rejection errors side-by-side.
+                </p>
+                <div class="textarea-wrapper">
+                    <label for="custom-json-input" class="sr-only">JSON Input</label>
+                    <textarea id="custom-json-input" rows="10" spellcheck="false" placeholder='{
+    "name": "Port Mortem 2026",
+    "languages": ["C", "Rust"],
+    "safety_guarantee": true,
+    "unsafe_blocks": 0
+}'></textarea>
+                </div>
+                <div class="modal-examples">
+                    <span class="example-label">QUICK SAMPLES:</span>
+                    <button class="btn-sample" data-sample="small">Small Object</button>
+                    <button class="btn-sample" data-sample="deep">Deeply Nested (Glossary)</button>
+                    <button class="btn-sample" data-sample="unicode">Unicode &amp; Escapes</button>
+                    <button class="btn-sample" data-sample="invalid">Invalid Trailing Comma (Reject Test)</button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="btn-modal-cancel" class="btn-terminal">Cancel</button>
+                <button id="btn-modal-run" class="btn-terminal btn-primary">► PARSE &amp; COMPUTE SIDE-BY-SIDE
+                    DIFF</button>
+            </div>
+        </div>
+    </div>
+
+
+
+    <!-- CRT Scanline Overlay -->
+    <div class="crt-overlay" aria-hidden="true"></div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
