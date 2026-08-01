@@ -108,8 +108,7 @@ fn parse_unicode_escape(bytes: &[u8], pos: usize) -> Result<(char, usize), CJson
         if !(0xDC00..=0xDFFF).contains(&second) {
             return Err(CJsonError::InvalidUnicodeEscape { pos });
         }
-        let codepoint = 0x10000u32
-            + (((first as u32 & 0x3FF) << 10) | (second as u32 & 0x3FF));
+        let codepoint = 0x10000u32 + (((first as u32 & 0x3FF) << 10) | (second as u32 & 0x3FF));
         let ch = char::from_u32(codepoint).ok_or(CJsonError::InvalidUnicodeEscape { pos })?;
         return Ok((ch, 12));
     }
@@ -144,14 +143,38 @@ pub fn parse_string_literal(input: &[u8]) -> Result<(String, usize), CJsonError>
                     return Err(CJsonError::UnterminatedString { pos: i });
                 }
                 match input[i + 1] {
-                    b'b' => { out.push('\u{8}'); i += 2; }
-                    b'f' => { out.push('\u{c}'); i += 2; }
-                    b'n' => { out.push('\n'); i += 2; }
-                    b'r' => { out.push('\r'); i += 2; }
-                    b't' => { out.push('\t'); i += 2; }
-                    b'"' => { out.push('"'); i += 2; }
-                    b'\\' => { out.push('\\'); i += 2; }
-                    b'/' => { out.push('/'); i += 2; }
+                    b'b' => {
+                        out.push('\u{8}');
+                        i += 2;
+                    }
+                    b'f' => {
+                        out.push('\u{c}');
+                        i += 2;
+                    }
+                    b'n' => {
+                        out.push('\n');
+                        i += 2;
+                    }
+                    b'r' => {
+                        out.push('\r');
+                        i += 2;
+                    }
+                    b't' => {
+                        out.push('\t');
+                        i += 2;
+                    }
+                    b'"' => {
+                        out.push('"');
+                        i += 2;
+                    }
+                    b'\\' => {
+                        out.push('\\');
+                        i += 2;
+                    }
+                    b'/' => {
+                        out.push('/');
+                        i += 2;
+                    }
                     b'u' => {
                         let (ch, consumed) = parse_unicode_escape(&input[i..], i)?;
                         out.push(ch);
@@ -176,6 +199,7 @@ pub fn parse_string_literal(input: &[u8]) -> Result<(String, usize), CJsonError>
 }
 
 #[cfg(test)]
+#[allow(clippy::approx_constant)]
 mod tests {
     use super::*;
 
@@ -248,11 +272,11 @@ mod tests {
 
     #[test]
     fn string_escapes() {
+        assert_eq!(parse_string_literal(b"\"a\\nb\"").unwrap().0, "a\nb");
         assert_eq!(
-            parse_string_literal(b"\"a\\nb\"").unwrap().0,
-            "a\nb"
+            parse_string_literal(b"\"\\t\\r\\b\\f\"").unwrap().0,
+            "\t\r\u{8}\u{c}"
         );
-        assert_eq!(parse_string_literal(b"\"\\t\\r\\b\\f\"").unwrap().0, "\t\r\u{8}\u{c}");
         assert_eq!(parse_string_literal(b"\"\\\"\\\\\\/\"").unwrap().0, "\"\\/");
     }
 
@@ -323,7 +347,11 @@ struct Parser<'a> {
 
 impl<'a> Parser<'a> {
     fn new(input: &'a [u8]) -> Self {
-        Parser { input, pos: 0, depth: 0 }
+        Parser {
+            input,
+            pos: 0,
+            depth: 0,
+        }
     }
 
     fn peek(&self) -> Option<u8> {
@@ -362,9 +390,13 @@ impl<'a> Parser<'a> {
         let base = self.pos;
         match err {
             CJsonError::InvalidString { pos } => CJsonError::InvalidString { pos: base + pos },
-            CJsonError::UnterminatedString { pos } => CJsonError::UnterminatedString { pos: base + pos },
+            CJsonError::UnterminatedString { pos } => {
+                CJsonError::UnterminatedString { pos: base + pos }
+            }
             CJsonError::InvalidEscape { pos } => CJsonError::InvalidEscape { pos: base + pos },
-            CJsonError::InvalidUnicodeEscape { pos } => CJsonError::InvalidUnicodeEscape { pos: base + pos },
+            CJsonError::InvalidUnicodeEscape { pos } => {
+                CJsonError::InvalidUnicodeEscape { pos: base + pos }
+            }
             CJsonError::InvalidUtf8 { pos } => CJsonError::InvalidUtf8 { pos: base + pos },
             CJsonError::InvalidNumber { pos } => CJsonError::InvalidNumber { pos: base + pos },
             other => other,
@@ -478,8 +510,8 @@ impl<'a> Parser<'a> {
                 self.depth -= 1;
                 return Err(CJsonError::ExpectedObjectKey { pos: self.pos });
             }
-            let (key, len) = parse_string_literal(&self.input[self.pos..])
-                .map_err(|e| self.offset_error(e))?;
+            let (key, len) =
+                parse_string_literal(&self.input[self.pos..]).map_err(|e| self.offset_error(e))?;
             self.pos += len;
             self.skip_whitespace();
 
@@ -563,7 +595,9 @@ mod value_parser_tests {
     fn parses_scalar_string_and_number() {
         assert_eq!(parse("\"hi\"").unwrap(), Value::String("hi".to_string()));
         assert_eq!(parse("42").unwrap(), Value::Number(42.0));
-        assert_eq!(parse("-3.14").unwrap(), Value::Number(-3.14));
+
+        let expected = "-3.14".parse::<f64>().unwrap();
+        assert_eq!(parse("-3.14").unwrap(), Value::Number(expected));
     }
 
     #[test]
@@ -638,7 +672,10 @@ mod value_parser_tests {
     #[test]
     fn rejects_unterminated_array() {
         let err = parse("[1, 2").unwrap_err();
-        assert!(matches!(err, CJsonError::UnexpectedEnd { .. }) || matches!(err, CJsonError::ExpectedCommaOrClose { .. }));
+        assert!(
+            matches!(err, CJsonError::UnexpectedEnd { .. })
+                || matches!(err, CJsonError::ExpectedCommaOrClose { .. })
+        );
     }
 
     #[test]
@@ -782,7 +819,10 @@ mod minify_tests {
 
     #[test]
     fn preserves_whitespace_inside_strings() {
-        assert_eq!(minify(r#"{"a": "hello   world"}"#), r#"{"a":"hello   world"}"#);
+        assert_eq!(
+            minify(r#"{"a": "hello   world"}"#),
+            r#"{"a":"hello   world"}"#
+        );
     }
 
     #[test]
@@ -792,7 +832,10 @@ mod minify_tests {
 
     #[test]
     fn slash_inside_string_is_not_a_comment() {
-        assert_eq!(minify(r#"{"url": "http://example.com"}"#), r#"{"url":"http://example.com"}"#);
+        assert_eq!(
+            minify(r#"{"url": "http://example.com"}"#),
+            r#"{"url":"http://example.com"}"#
+        );
     }
 
     #[test]

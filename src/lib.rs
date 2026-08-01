@@ -6,8 +6,8 @@
 //! Patch are still pending.
 
 pub mod error;
-pub mod value;
+pub mod ffi;
 pub mod parse;
 pub mod print;
 pub mod utils;
-pub mod ffi;
+pub mod value;

@@ -36,7 +36,12 @@ pub fn print_unformatted(value: &Value) -> Result<String, CJsonError> {
 }
 
 /// Mirrors print_value (cJSON.c:1423-1483).
-fn print_value(value: &Value, out: &mut String, format: bool, depth: usize) -> Result<(), CJsonError> {
+fn print_value(
+    value: &Value,
+    out: &mut String,
+    format: bool,
+    depth: usize,
+) -> Result<(), CJsonError> {
     match value {
         Value::Null => out.push_str("null"),
         Value::Bool(true) => out.push_str("true"),
@@ -56,7 +61,12 @@ fn print_value(value: &Value, out: &mut String, format: bool, depth: usize) -> R
 /// space if `format`), with **no** newlines or indentation at the array
 /// level itself - only nested objects get multi-line treatment. This looks
 /// odd for e.g. an array of objects, but it's upstream's actual behavior.
-fn print_array(items: &[Value], out: &mut String, format: bool, depth: usize) -> Result<(), CJsonError> {
+fn print_array(
+    items: &[Value],
+    out: &mut String,
+    format: bool,
+    depth: usize,
+) -> Result<(), CJsonError> {
     if depth >= NESTING_LIMIT {
         return Err(CJsonError::NestingTooDeep { pos: depth });
     }
@@ -81,7 +91,12 @@ fn print_array(items: &[Value], out: &mut String, format: bool, depth: usize) ->
 ///
 /// Quirk preserved from upstream: an *empty* formatted object still prints
 /// as `{\n}` (the `\n` after `{` is unconditional), not `{}`.
-fn print_object(pairs: &[(String, Value)], out: &mut String, format: bool, depth: usize) -> Result<(), CJsonError> {
+fn print_object(
+    pairs: &[(String, Value)],
+    out: &mut String,
+    format: bool,
+    depth: usize,
+) -> Result<(), CJsonError> {
     if depth >= NESTING_LIMIT {
         return Err(CJsonError::NestingTooDeep { pos: depth });
     }
@@ -92,7 +107,7 @@ fn print_object(pairs: &[(String, Value)], out: &mut String, format: bool, depth
     let depth = depth + 1;
     for (i, (key, val)) in pairs.iter().enumerate() {
         if format {
-            out.extend(std::iter::repeat('\t').take(depth));
+            out.extend(std::iter::repeat_n('\t', depth));
         }
         print_string_ptr(key, out);
         out.push(':');
@@ -108,7 +123,7 @@ fn print_object(pairs: &[(String, Value)], out: &mut String, format: bool, depth
         }
     }
     if format {
-        out.extend(std::iter::repeat('\t').take(depth - 1));
+        out.extend(std::iter::repeat_n('\t', depth - 1));
     }
     out.push('}');
     Ok(())
@@ -190,8 +205,12 @@ fn format_g(d: f64, sig_digits: usize) -> String {
     // digits, e.g. "3.14159265358979e0". Rust's `{:e}` mantissa is always a
     // single nonzero leading digit (matching %e/%g convention).
     let sci = format!("{:.*e}", sig_digits - 1, abs_d);
-    let (mantissa_part, exp_part) = sci.split_once('e').expect("float Display always includes 'e'");
-    let exponent: i32 = exp_part.parse().expect("exponent is always a plain integer");
+    let (mantissa_part, exp_part) = sci
+        .split_once('e')
+        .expect("float Display always includes 'e'");
+    let exponent: i32 = exp_part
+        .parse()
+        .expect("exponent is always a plain integer");
     let digits: String = mantissa_part.chars().filter(|c| *c != '.').collect();
 
     let use_scientific = exponent < -4 || exponent >= sig_digits as i32;
@@ -219,7 +238,14 @@ fn format_g(d: f64, sig_digits: usize) -> String {
         let leading_zeros = "0".repeat((-exponent - 1) as usize);
         let frac = format!("{}{}", leading_zeros, digits);
         let frac_trimmed = frac.trim_end_matches('0');
-        format!("0.{}", if frac_trimmed.is_empty() { "0" } else { frac_trimmed })
+        format!(
+            "0.{}",
+            if frac_trimmed.is_empty() {
+                "0"
+            } else {
+                frac_trimmed
+            }
+        )
     };
 
     if neg {
@@ -228,9 +254,10 @@ fn format_g(d: f64, sig_digits: usize) -> String {
         body
     }
 }
-
 #[cfg(test)]
+#[allow(clippy::approx_constant)]
 mod tests {
+
     use super::*;
 
     // --- print_number: vectors lifted directly from upstream's
@@ -262,9 +289,9 @@ mod tests {
         assert_eq!(print_number(10e11), "1000000000000");
         assert_eq!(print_number(123e+127), "1.23e+129");
         assert_eq!(print_number(123e-128), "1.23e-126");
-        assert_eq!(print_number(3.1415926535897931), "3.1415926535897931");
+        let value = "3.1415926535897931".parse::<f64>().unwrap();
+        assert_eq!(print_number(value), "3.1415926535897931");
     }
-
     #[test]
     fn number_negative_reals() {
         assert_eq!(print_number(-0.0123), "-0.0123");
@@ -312,7 +339,10 @@ mod tests {
     fn unformatted_object_and_array() {
         let v = Value::Object(vec![
             ("a".to_string(), Value::Number(1.0)),
-            ("b".to_string(), Value::Array(vec![Value::Number(2.0), Value::Number(3.0)])),
+            (
+                "b".to_string(),
+                Value::Array(vec![Value::Number(2.0), Value::Number(3.0)]),
+            ),
         ]);
         assert_eq!(print_unformatted(&v).unwrap(), r#"{"a":1,"b":[2,3]}"#);
     }

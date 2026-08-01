@@ -80,7 +80,10 @@ pub unsafe extern "C" fn cjson_rs_print_unformatted(handle: *const Value) -> *mu
         return ptr::null_mut();
     }
     let value = &*handle;
-    match print_unformatted(value).ok().and_then(|s| CString::new(s).ok()) {
+    match print_unformatted(value)
+        .ok()
+        .and_then(|s| CString::new(s).ok())
+    {
         Some(cstr) => cstr.into_raw(),
         None => ptr::null_mut(),
     }
@@ -113,6 +116,7 @@ pub unsafe extern "C" fn cjson_rs_free_string(s: *mut c_char) {
 }
 
 #[cfg(test)]
+#[allow(clippy::approx_constant)]
 mod tests {
     use super::*;
     use std::ffi::CString;

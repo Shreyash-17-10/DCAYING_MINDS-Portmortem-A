@@ -28,36 +28,74 @@ pub enum Value {
 impl Value {
     // --- Constructors (mirror cJSON_Create*) ---
 
-    pub fn null() -> Self { Value::Null }
-    pub fn boolean(b: bool) -> Self { Value::Bool(b) }
-    pub fn number(n: f64) -> Self { Value::Number(n) }
-    pub fn string<S: Into<String>>(s: S) -> Self { Value::String(s.into()) }
-    pub fn raw<S: Into<String>>(s: S) -> Self { Value::Raw(s.into()) }
-    pub fn array() -> Self { Value::Array(Vec::new()) }
-    pub fn object() -> Self { Value::Object(Vec::new()) }
+    pub fn null() -> Self {
+        Value::Null
+    }
+    pub fn boolean(b: bool) -> Self {
+        Value::Bool(b)
+    }
+    pub fn number(n: f64) -> Self {
+        Value::Number(n)
+    }
+    pub fn string<S: Into<String>>(s: S) -> Self {
+        Value::String(s.into())
+    }
+    pub fn raw<S: Into<String>>(s: S) -> Self {
+        Value::Raw(s.into())
+    }
+    pub fn array() -> Self {
+        Value::Array(Vec::new())
+    }
+    pub fn object() -> Self {
+        Value::Object(Vec::new())
+    }
 
     // --- Type predicates (mirror cJSON_Is*) ---
 
-    pub fn is_null(&self) -> bool { matches!(self, Value::Null) }
-    pub fn is_bool(&self) -> bool { matches!(self, Value::Bool(_)) }
-    pub fn is_true(&self) -> bool { matches!(self, Value::Bool(true)) }
-    pub fn is_false(&self) -> bool { matches!(self, Value::Bool(false)) }
-    pub fn is_number(&self) -> bool { matches!(self, Value::Number(_)) }
-    pub fn is_string(&self) -> bool { matches!(self, Value::String(_)) }
-    pub fn is_raw(&self) -> bool { matches!(self, Value::Raw(_)) }
-    pub fn is_array(&self) -> bool { matches!(self, Value::Array(_)) }
-    pub fn is_object(&self) -> bool { matches!(self, Value::Object(_)) }
+    pub fn is_null(&self) -> bool {
+        matches!(self, Value::Null)
+    }
+    pub fn is_bool(&self) -> bool {
+        matches!(self, Value::Bool(_))
+    }
+    pub fn is_true(&self) -> bool {
+        matches!(self, Value::Bool(true))
+    }
+    pub fn is_false(&self) -> bool {
+        matches!(self, Value::Bool(false))
+    }
+    pub fn is_number(&self) -> bool {
+        matches!(self, Value::Number(_))
+    }
+    pub fn is_string(&self) -> bool {
+        matches!(self, Value::String(_))
+    }
+    pub fn is_raw(&self) -> bool {
+        matches!(self, Value::Raw(_))
+    }
+    pub fn is_array(&self) -> bool {
+        matches!(self, Value::Array(_))
+    }
+    pub fn is_object(&self) -> bool {
+        matches!(self, Value::Object(_))
+    }
 
     // --- Accessors ---
 
     /// Mirrors the deprecated `valueint` field: truncates toward zero,
     /// matching cJSON's `(int)number` cast behavior.
     pub fn as_int(&self) -> Option<i32> {
-        match self { Value::Number(n) => Some(*n as i32), _ => None }
+        match self {
+            Value::Number(n) => Some(*n as i32),
+            _ => None,
+        }
     }
 
     pub fn as_f64(&self) -> Option<f64> {
-        match self { Value::Number(n) => Some(*n), _ => None }
+        match self {
+            Value::Number(n) => Some(*n),
+            _ => None,
+        }
     }
 
     pub fn as_str(&self) -> Option<&str> {
@@ -68,19 +106,31 @@ impl Value {
     }
 
     pub fn as_array(&self) -> Option<&[Value]> {
-        match self { Value::Array(items) => Some(items), _ => None }
+        match self {
+            Value::Array(items) => Some(items),
+            _ => None,
+        }
     }
 
     pub fn as_array_mut(&mut self) -> Option<&mut Vec<Value>> {
-        match self { Value::Array(items) => Some(items), _ => None }
+        match self {
+            Value::Array(items) => Some(items),
+            _ => None,
+        }
     }
 
     pub fn as_object(&self) -> Option<&[(String, Value)]> {
-        match self { Value::Object(pairs) => Some(pairs), _ => None }
+        match self {
+            Value::Object(pairs) => Some(pairs),
+            _ => None,
+        }
     }
 
     pub fn as_object_mut(&mut self) -> Option<&mut Vec<(String, Value)>> {
-        match self { Value::Object(pairs) => Some(pairs), _ => None }
+        match self {
+            Value::Object(pairs) => Some(pairs),
+            _ => None,
+        }
     }
 
     // --- Array mutation (mirror cJSON_AddItemToArray) ---
@@ -90,12 +140,17 @@ impl Value {
     /// silently corrupting state).
     pub fn array_push(&mut self, item: Value) -> Result<(), Value> {
         match self {
-            Value::Array(items) => { items.push(item); Ok(()) }
+            Value::Array(items) => {
+                items.push(item);
+                Ok(())
+            }
             _ => Err(item),
         }
     }
 
-    pub fn array_len(&self) -> Option<usize> { self.as_array().map(|a| a.len()) }
+    pub fn array_len(&self) -> Option<usize> {
+        self.as_array().map(|a| a.len())
+    }
 
     pub fn array_get(&self, index: usize) -> Option<&Value> {
         self.as_array().and_then(|a| a.get(index))
@@ -108,14 +163,20 @@ impl Value {
     /// allowed; lookup returns the first match, same as C).
     pub fn object_push<S: Into<String>>(&mut self, key: S, item: Value) -> Result<(), Value> {
         match self {
-            Value::Object(pairs) => { pairs.push((key.into(), item)); Ok(()) }
+            Value::Object(pairs) => {
+                pairs.push((key.into(), item));
+                Ok(())
+            }
             _ => Err(item),
         }
     }
 
     /// Case-sensitive lookup, mirrors cJSON_GetObjectItemCaseSensitive.
     pub fn object_get(&self, key: &str) -> Option<&Value> {
-        self.as_object()?.iter().find(|(k, _)| k == key).map(|(_, v)| v)
+        self.as_object()?
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v)
     }
 
     /// Case-insensitive lookup, mirrors cJSON_GetObjectItem.
@@ -126,7 +187,9 @@ impl Value {
             .map(|(_, v)| v)
     }
 
-    pub fn object_has(&self, key: &str) -> bool { self.object_get(key).is_some() }
+    pub fn object_has(&self, key: &str) -> bool {
+        self.object_get(key).is_some()
+    }
 
     // ========================================================================
     // Phase 5: manipulation API (cJSON.c Detach/Delete/Insert/Replace/
@@ -158,7 +221,11 @@ impl Value {
     pub fn object_detach(&mut self, key: &str, case_sensitive: bool) -> Option<Value> {
         let pairs = self.as_object_mut()?;
         let idx = pairs.iter().position(|(k, _)| {
-            if case_sensitive { k == key } else { k.eq_ignore_ascii_case(key) }
+            if case_sensitive {
+                k == key
+            } else {
+                k.eq_ignore_ascii_case(key)
+            }
         })?;
         Some(pairs.remove(idx).1)
     }
@@ -209,7 +276,11 @@ impl Value {
         match self.as_object_mut() {
             Some(pairs) => {
                 let idx = pairs.iter().position(|(k, _)| {
-                    if case_sensitive { k == key } else { k.eq_ignore_ascii_case(key) }
+                    if case_sensitive {
+                        k == key
+                    } else {
+                        k.eq_ignore_ascii_case(key)
+                    }
                 });
                 match idx {
                     Some(i) => {
@@ -243,7 +314,12 @@ impl Value {
             }
             Value::Object(pairs) => {
                 if recurse {
-                    Value::Object(pairs.iter().map(|(k, v)| (k.clone(), v.duplicate(true))).collect())
+                    Value::Object(
+                        pairs
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.duplicate(true)))
+                            .collect(),
+                    )
                 } else {
                     Value::Object(Vec::new())
                 }
@@ -267,7 +343,11 @@ impl Value {
     pub fn add_number_to_object<S: Into<String>>(&mut self, name: S, n: f64) -> bool {
         self.object_push(name, Value::number(n)).is_ok()
     }
-    pub fn add_string_to_object<S: Into<String>, V: Into<String>>(&mut self, name: S, s: V) -> bool {
+    pub fn add_string_to_object<S: Into<String>, V: Into<String>>(
+        &mut self,
+        name: S,
+        s: V,
+    ) -> bool {
         self.object_push(name, Value::string(s)).is_ok()
     }
     pub fn add_raw_to_object<S: Into<String>, V: Into<String>>(&mut self, name: S, raw: V) -> bool {
@@ -304,7 +384,10 @@ pub fn compare(a: &Value, b: &Value, case_sensitive: bool) -> bool {
         (Value::String(x), Value::String(y)) | (Value::Raw(x), Value::Raw(y)) => x == y,
         (Value::Array(xs), Value::Array(ys)) => {
             xs.len() == ys.len()
-                && xs.iter().zip(ys.iter()).all(|(x, y)| compare(x, y, case_sensitive))
+                && xs
+                    .iter()
+                    .zip(ys.iter())
+                    .all(|(x, y)| compare(x, y, case_sensitive))
         }
         (Value::Object(xs), Value::Object(ys)) => {
             // Checked in both directions (mirrors upstream's own two-pass
@@ -312,9 +395,11 @@ pub fn compare(a: &Value, b: &Value, case_sensitive: bool) -> bool {
             // match): every key in `xs` must exist in `ys` with an equal
             // value, and vice versa.
             xs.iter().all(|(k, v)| {
-                object_lookup(ys, k, case_sensitive).is_some_and(|bv| compare(v, bv, case_sensitive))
+                object_lookup(ys, k, case_sensitive)
+                    .is_some_and(|bv| compare(v, bv, case_sensitive))
             }) && ys.iter().all(|(k, v)| {
-                object_lookup(xs, k, case_sensitive).is_some_and(|av| compare(v, av, case_sensitive))
+                object_lookup(xs, k, case_sensitive)
+                    .is_some_and(|av| compare(v, av, case_sensitive))
             })
         }
         _ => false,
@@ -328,10 +413,20 @@ pub fn compare(a: &Value, b: &Value, case_sensitive: bool) -> bool {
 /// lifetime bound that Rust's closure inference can't derive on its own
 /// (it picks a single unified lifetime and then rejects the return type) -
 /// a `fn` states the two lifetimes explicitly instead.
-fn object_lookup<'a>(pairs: &'a [(String, Value)], key: &str, case_sensitive: bool) -> Option<&'a Value> {
+fn object_lookup<'a>(
+    pairs: &'a [(String, Value)],
+    key: &str,
+    case_sensitive: bool,
+) -> Option<&'a Value> {
     pairs
         .iter()
-        .find(|(k, _)| if case_sensitive { k == key } else { k.eq_ignore_ascii_case(key) })
+        .find(|(k, _)| {
+            if case_sensitive {
+                k == key
+            } else {
+                k.eq_ignore_ascii_case(key)
+            }
+        })
         .map(|(_, v)| v)
 }
 
@@ -345,6 +440,7 @@ fn compare_double(a: f64, b: f64) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::approx_constant)]
 mod tests {
     use super::*;
 
@@ -404,10 +500,17 @@ mod tests {
 
     #[test]
     fn array_detach_removes_and_returns_shifting_rest_left() {
-        let mut arr = Value::Array(vec![Value::number(1.0), Value::number(2.0), Value::number(3.0)]);
+        let mut arr = Value::Array(vec![
+            Value::number(1.0),
+            Value::number(2.0),
+            Value::number(3.0),
+        ]);
         let detached = arr.array_detach(1).unwrap();
         assert_eq!(detached, Value::number(2.0));
-        assert_eq!(arr, Value::Array(vec![Value::number(1.0), Value::number(3.0)]));
+        assert_eq!(
+            arr,
+            Value::Array(vec![Value::number(1.0), Value::number(3.0)])
+        );
         assert_eq!(arr.array_detach(99), None);
     }
 
@@ -428,7 +531,11 @@ mod tests {
         arr.array_insert(1, Value::number(2.0)).unwrap();
         assert_eq!(
             arr,
-            Value::Array(vec![Value::number(1.0), Value::number(2.0), Value::number(3.0)])
+            Value::Array(vec![
+                Value::number(1.0),
+                Value::number(2.0),
+                Value::number(3.0)
+            ])
         );
         arr.array_insert(99, Value::number(4.0)).unwrap();
         assert_eq!(arr.array_get(3), Some(&Value::number(4.0)));
@@ -448,7 +555,10 @@ mod tests {
         // original casing is overwritten by the search key.
         let mut obj = Value::Object(vec![("Name".to_string(), Value::number(1.0))]);
         assert!(obj.object_replace("name", false, Value::number(2.0)));
-        assert_eq!(obj.as_object().unwrap(), &[("name".to_string(), Value::number(2.0))]);
+        assert_eq!(
+            obj.as_object().unwrap(),
+            &[("name".to_string(), Value::number(2.0))]
+        );
     }
 
     #[test]
@@ -481,7 +591,11 @@ mod tests {
 
     #[test]
     fn compare_numbers_uses_epsilon_not_bit_equality() {
-        assert!(compare(&Value::number(0.1 + 0.2), &Value::number(0.3), true));
+        assert!(compare(
+            &Value::number(0.1 + 0.2),
+            &Value::number(0.3),
+            true
+        ));
     }
 
     #[test]

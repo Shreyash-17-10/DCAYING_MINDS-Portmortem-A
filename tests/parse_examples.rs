@@ -30,54 +30,79 @@ fn read_fixture(name: &str) -> String {
 /// exact byte-for-byte match against the `.expected` file.
 fn do_test(test_name: &str) {
     let input = read_fixture(test_name);
+
     let expected = read_fixture(&format!("{test_name}.expected"));
 
-    let tree = parse(&input).unwrap_or_else(|e| {
-        panic!("failed to parse {test_name}: {e:?}")
-    });
+    let tree = parse(&input).unwrap_or_else(|e| panic!("failed to parse {test_name}: {e:?}"));
 
     let actual = cjson_rs::print::print(&tree)
         .unwrap_or_else(|e| panic!("failed to print {test_name}: {e:?}"));
+
+    let expected = expected.replace("\r\n", "\n");
+    let actual = actual.replace("\r\n", "\n");
 
     assert_eq!(expected, actual, "mismatch for {test_name}");
 }
 
 #[test]
-fn file_test1_should_be_parsed_and_printed() { do_test("test1"); }
+fn file_test1_should_be_parsed_and_printed() {
+    do_test("test1");
+}
 
 #[test]
-fn file_test2_should_be_parsed_and_printed() { do_test("test2"); }
+fn file_test2_should_be_parsed_and_printed() {
+    do_test("test2");
+}
 
 #[test]
-fn file_test3_should_be_parsed_and_printed() { do_test("test3"); }
+fn file_test3_should_be_parsed_and_printed() {
+    do_test("test3");
+}
 
 #[test]
-fn file_test4_should_be_parsed_and_printed() { do_test("test4"); }
+fn file_test4_should_be_parsed_and_printed() {
+    do_test("test4");
+}
 
 #[test]
-fn file_test5_should_be_parsed_and_printed() { do_test("test5"); }
+fn file_test5_should_be_parsed_and_printed() {
+    do_test("test5");
+}
 
 #[test]
-fn file_test7_should_be_parsed_and_printed() { do_test("test7"); }
+fn file_test7_should_be_parsed_and_printed() {
+    do_test("test7");
+}
 
 #[test]
-fn file_test8_should_be_parsed_and_printed() { do_test("test8"); }
+fn file_test8_should_be_parsed_and_printed() {
+    do_test("test8");
+}
 
 #[test]
-fn file_test9_should_be_parsed_and_printed() { do_test("test9"); }
+fn file_test9_should_be_parsed_and_printed() {
+    do_test("test9");
+}
 
 #[test]
-fn file_test10_should_be_parsed_and_printed() { do_test("test10"); }
+fn file_test10_should_be_parsed_and_printed() {
+    do_test("test10");
+}
 
 #[test]
-fn file_test11_should_be_parsed_and_printed() { do_test("test11"); }
+fn file_test11_should_be_parsed_and_printed() {
+    do_test("test11");
+}
 
 /// Mirrors `file_test6_should_not_be_parsed`: test6 is an HTML error page
 /// (not JSON at all), parsing it must fail.
 #[test]
 fn file_test6_should_not_be_parsed() {
     let input = read_fixture("test6");
-    assert!(parse(&input).is_err(), "test6 (HTML, not JSON) should fail to parse");
+    assert!(
+        parse(&input).is_err(),
+        "test6 (HTML, not JSON) should fail to parse"
+    );
 }
 
 /// Mirrors `test12_should_not_be_parsed`: an object with an unterminated
@@ -116,7 +141,10 @@ fn truncated_buffer_should_not_be_parsed() {
     let bytes = json.as_bytes();
     let truncated = &bytes[..bytes.len() - 2];
     let s = std::str::from_utf8(truncated).unwrap();
-    assert!(parse(s).is_err(), "truncated JSON should fail to parse, not read past the end");
+    assert!(
+        parse(s).is_err(),
+        "truncated JSON should fail to parse, not read past the end"
+    );
 }
 
 /// Mirrors `test15_should_not_heap_buffer_overflow` (an ASan regression

@@ -34,7 +34,11 @@ pub fn get_pointer_case_sensitive<'a>(value: &'a Value, pointer: &str) -> Option
 /// Mirrors get_item_from_pointer (cJSON_Utils.c:301-346): walks `/`-separated
 /// path tokens, indexing into arrays by decimal index and objects by
 /// (possibly escape-decoded) key.
-fn get_item_from_pointer<'a>(object: &'a Value, pointer: &str, case_sensitive: bool) -> Option<&'a Value> {
+fn get_item_from_pointer<'a>(
+    object: &'a Value,
+    pointer: &str,
+    case_sensitive: bool,
+) -> Option<&'a Value> {
     let mut current = object;
     let mut rest = pointer;
 
@@ -47,12 +51,10 @@ fn get_item_from_pointer<'a>(object: &'a Value, pointer: &str, case_sensitive: b
                 let index = decode_array_index_from_pointer(segment)?;
                 items.get(index)?
             }
-            Value::Object(pairs) => {
-                pairs
-                    .iter()
-                    .find(|(k, _)| compare_pointer_segment(k, segment, case_sensitive))
-                    .map(|(_, v)| v)?
-            }
+            Value::Object(pairs) => pairs
+                .iter()
+                .find(|(k, _)| compare_pointer_segment(k, segment, case_sensitive))
+                .map(|(_, v)| v)?,
             _ => return None,
         };
 
@@ -79,7 +81,9 @@ fn decode_array_index_from_pointer(segment: &str) -> Option<usize> {
     let mut index: usize = 0;
     let mut pos = 0;
     while pos < bytes.len() && bytes[pos].is_ascii_digit() {
-        index = index.checked_mul(10)?.checked_add((bytes[pos] - b'0') as usize)?;
+        index = index
+            .checked_mul(10)?
+            .checked_add((bytes[pos] - b'0') as usize)?;
         pos += 1;
     }
     if pos != bytes.len() {
@@ -102,17 +106,18 @@ fn compare_pointer_segment(name: &str, segment: &str, case_sensitive: bool) -> b
     while ni < name.len() && pi < seg.len() {
         if seg[pi] == '~' {
             let escaped = seg.get(pi + 1).copied();
-            let ok = (escaped == Some('0') && name[ni] == '~') || (escaped == Some('1') && name[ni] == '/');
+            let ok = (escaped == Some('0') && name[ni] == '~')
+                || (escaped == Some('1') && name[ni] == '/');
             if !ok {
                 return false;
             }
             pi += 1; // consume the extra escape-code character ('0'/'1'); the
-                      // loop's own `pi += 1` below consumes the '~' itself.
+                     // loop's own `pi += 1` below consumes the '~' itself.
         } else {
             let matches = if case_sensitive {
                 name[ni] == seg[pi]
             } else {
-                name[ni].to_ascii_lowercase() == seg[pi].to_ascii_lowercase()
+                name[ni].eq_ignore_ascii_case(&seg[pi])
             };
             if !matches {
                 return false;
@@ -174,6 +179,7 @@ fn encode_pointer_segment(key: &str) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::approx_constant)]
 mod tests {
     use super::*;
     use crate::parse::parse;
@@ -262,7 +268,10 @@ mod tests {
     #[test]
     fn finds_pointer_to_self() {
         let root = rfc6901_example();
-        assert_eq!(find_pointer_from_object_to(&root, &root), Some(String::new()));
+        assert_eq!(
+            find_pointer_from_object_to(&root, &root),
+            Some(String::new())
+        );
     }
 
     #[test]
@@ -273,19 +282,31 @@ mod tests {
         )]);
         let numbers = root.object_get("numbers").unwrap();
         let six = numbers.array_get(6).unwrap();
-        assert_eq!(find_pointer_from_object_to(&root, numbers), Some("/numbers".to_string()));
-        assert_eq!(find_pointer_from_object_to(&root, six), Some("/numbers/6".to_string()));
+        assert_eq!(
+            find_pointer_from_object_to(&root, numbers),
+            Some("/numbers".to_string())
+        );
+        assert_eq!(
+            find_pointer_from_object_to(&root, six),
+            Some("/numbers/6".to_string())
+        );
     }
 
     #[test]
     fn finds_pointer_and_escapes_tilde_and_slash_in_keys() {
         let obj1 = Value::Object(vec![("m~n".to_string(), Value::string("m~n"))]);
         let target1 = obj1.object_get("m~n").unwrap();
-        assert_eq!(find_pointer_from_object_to(&obj1, target1), Some("/m~0n".to_string()));
+        assert_eq!(
+            find_pointer_from_object_to(&obj1, target1),
+            Some("/m~0n".to_string())
+        );
 
         let obj2 = Value::Object(vec![("m/n".to_string(), Value::string("m/n"))]);
         let target2 = obj2.object_get("m/n").unwrap();
-        assert_eq!(find_pointer_from_object_to(&obj2, target2), Some("/m~1n".to_string()));
+        assert_eq!(
+            find_pointer_from_object_to(&obj2, target2),
+            Some("/m~1n".to_string())
+        );
     }
 
     #[test]
@@ -423,7 +444,11 @@ fn split_last_pointer_segment(path: &str) -> Option<(&str, String)> {
 /// parent container a patch operation will mutate. No `unsafe`: reassigning
 /// `current` inside the loop relies on ordinary non-lexical-lifetime
 /// reborrowing, not raw pointers.
-fn get_pointer_mut<'a>(value: &'a mut Value, pointer: &str, case_sensitive: bool) -> Option<&'a mut Value> {
+fn get_pointer_mut<'a>(
+    value: &'a mut Value,
+    pointer: &str,
+    case_sensitive: bool,
+) -> Option<&'a mut Value> {
     let mut current = value;
     let mut rest = pointer;
 
@@ -467,12 +492,17 @@ fn detach_by_pointer(object: &mut Value, path: &str, case_sensitive: bool) -> Op
 
 /// Applies a single JSON Patch operation object to `object` in place.
 /// Mirrors `apply_patch` (cJSON_Utils.c:807-1036) function-for-function.
-fn apply_patch_inner(object: &mut Value, patch: &Value, case_sensitive: bool) -> Result<(), PatchError> {
+fn apply_patch_inner(
+    object: &mut Value,
+    patch: &Value,
+    case_sensitive: bool,
+) -> Result<(), PatchError> {
     let path = get_object_item(patch, "path", case_sensitive)
         .and_then(Value::as_str)
         .ok_or(PatchError::MalformedPatch)?;
 
-    let opcode = decode_patch_operation(patch, case_sensitive).ok_or(PatchError::InvalidOperation)?;
+    let opcode =
+        decode_patch_operation(patch, case_sensitive).ok_or(PatchError::InvalidOperation)?;
 
     if let PatchOp::Test = opcode {
         let actual = get_item_from_pointer(object, path, case_sensitive);
@@ -536,15 +566,18 @@ fn apply_patch_inner(object: &mut Value, patch: &Value, case_sensitive: bool) ->
             source.duplicate(true)
         }
         PatchOp::Add | PatchOp::Replace => {
-            let v = get_object_item(patch, "value", case_sensitive).ok_or(PatchError::MissingValue)?;
+            let v =
+                get_object_item(patch, "value", case_sensitive).ok_or(PatchError::MissingValue)?;
             v.duplicate(true)
         }
         PatchOp::Remove | PatchOp::Test => unreachable!("handled above"),
     };
 
     // Add "value" at "path" (cJSON_Utils.c:959-1023).
-    let (parent_pointer, child_segment) = split_last_pointer_segment(path).ok_or(PatchError::PathNotFound)?;
-    let parent = get_pointer_mut(object, parent_pointer, case_sensitive).ok_or(PatchError::PathNotFound)?;
+    let (parent_pointer, child_segment) =
+        split_last_pointer_segment(path).ok_or(PatchError::PathNotFound)?;
+    let parent =
+        get_pointer_mut(object, parent_pointer, case_sensitive).ok_or(PatchError::PathNotFound)?;
 
     match parent {
         Value::Array(items) => {
@@ -591,7 +624,11 @@ pub fn apply_patch_case_sensitive(object: &mut Value, patch: &Value) -> Result<(
     apply_patch_inner(object, patch, true)
 }
 
-fn apply_patches_inner(object: &mut Value, patches: &Value, case_sensitive: bool) -> Result<(), PatchError> {
+fn apply_patches_inner(
+    object: &mut Value,
+    patches: &Value,
+    case_sensitive: bool,
+) -> Result<(), PatchError> {
     let items = patches.as_array().ok_or(PatchError::MalformedPatch)?;
     for patch in items {
         apply_patch_inner(object, patch, case_sensitive)?;
@@ -626,14 +663,20 @@ fn merge_patch_inner(target: Value, patch: &Value, case_sensitive: bool) -> Valu
         None => return patch.duplicate(true),
     };
 
-    let mut target = if target.is_object() { target } else { Value::object() };
+    let mut target = if target.is_object() {
+        target
+    } else {
+        Value::object()
+    };
 
-    for (key, patch_child) in patch_pairs.to_vec() {
+    for (key, patch_child) in patch_pairs.iter().cloned() {
         if patch_child.is_null() {
             // RFC 7396: null in the patch means "delete this key".
             target.object_delete(&key, case_sensitive);
         } else {
-            let existing = target.object_detach(&key, case_sensitive).unwrap_or(Value::Null);
+            let existing = target
+                .object_detach(&key, case_sensitive)
+                .unwrap_or(Value::Null);
             let merged = merge_patch_inner(existing, &patch_child, case_sensitive);
             let _ = target.object_push(key, merged);
         }
@@ -705,7 +748,10 @@ mod patch_tests {
     fn add_index_past_end_is_error() {
         let mut object = doc(r#"["a"]"#);
         let patches = doc(r#"[{"op":"add","path":"/5","value":"x"}]"#);
-        assert_eq!(apply_patches(&mut object, &patches), Err(PatchError::ArrayIndexInvalid));
+        assert_eq!(
+            apply_patches(&mut object, &patches),
+            Err(PatchError::ArrayIndexInvalid)
+        );
     }
 
     #[test]
@@ -720,11 +766,8 @@ mod patch_tests {
 
     #[test]
     fn remove_array_element() {
-        let out = apply_and_print(
-            r#"["a","b","c"]"#,
-            r#"[{"op": "remove", "path": "/1"}]"#,
-        )
-        .unwrap();
+        let out =
+            apply_and_print(r#"["a","b","c"]"#, r#"[{"op": "remove", "path": "/1"}]"#).unwrap();
         assert_eq!(out, r#"["a","c"]"#);
     }
 
@@ -732,7 +775,10 @@ mod patch_tests {
     fn remove_missing_path_is_error() {
         let mut object = doc(r#"{"foo": "bar"}"#);
         let patches = doc(r#"[{"op":"remove","path":"/nope"}]"#);
-        assert_eq!(apply_patches(&mut object, &patches), Err(PatchError::PathNotFound));
+        assert_eq!(
+            apply_patches(&mut object, &patches),
+            Err(PatchError::PathNotFound)
+        );
     }
 
     #[test]
@@ -752,7 +798,10 @@ mod patch_tests {
             r#"[{"op": "move", "from": "/foo/waldo", "path": "/qux/thud"}]"#,
         )
         .unwrap();
-        assert_eq!(out, r#"{"foo":{"bar":"baz"},"qux":{"corge":"grault","thud":"fred"}}"#);
+        assert_eq!(
+            out,
+            r#"{"foo":{"bar":"baz"},"qux":{"corge":"grault","thud":"fred"}}"#
+        );
     }
 
     #[test]
@@ -785,7 +834,10 @@ mod patch_tests {
         assert_eq!(apply_patches(&mut object, &ok_patch), Ok(()));
 
         let bad_patch = doc(r#"[{"op": "test", "path": "/baz", "value": "bar"}]"#);
-        assert_eq!(apply_patches(&mut object, &bad_patch), Err(PatchError::TestFailed));
+        assert_eq!(
+            apply_patches(&mut object, &bad_patch),
+            Err(PatchError::TestFailed)
+        );
     }
 
     #[test]
@@ -819,13 +871,14 @@ mod patch_tests {
         // Mirrors upstream: already-applied ops before a failing one stay
         // applied (no rollback).
         let mut object = doc(r#"{"foo": 1}"#);
-        let patches = doc(
-            r#"[
+        let patches = doc(r#"[
                 {"op": "add", "path": "/bar", "value": 2},
                 {"op": "remove", "path": "/does-not-exist"}
-            ]"#,
+            ]"#);
+        assert_eq!(
+            apply_patches(&mut object, &patches),
+            Err(PatchError::PathNotFound)
         );
-        assert_eq!(apply_patches(&mut object, &patches), Err(PatchError::PathNotFound));
         assert_eq!(print_unformatted(&object).unwrap(), r#"{"foo":1,"bar":2}"#);
     }
 
@@ -833,29 +886,28 @@ mod patch_tests {
     fn malformed_patches_document_is_rejected() {
         let mut object = doc(r#"{}"#);
         let not_an_array = doc(r#"{"op":"add"}"#);
-        assert_eq!(apply_patches(&mut object, &not_an_array), Err(PatchError::MalformedPatch));
+        assert_eq!(
+            apply_patches(&mut object, &not_an_array),
+            Err(PatchError::MalformedPatch)
+        );
     }
 
     // --- Merge Patch (RFC 7396 §1 example, verbatim) ---
 
     #[test]
     fn merge_patch_rfc7396_example() {
-        let target = doc(
-            r#"{
+        let target = doc(r#"{
                 "title": "Goodbye!",
                 "author": {"givenName": "John", "familyName": "Doe"},
                 "tags": ["example", "sample"],
                 "content": "This will be unchanged"
-            }"#,
-        );
-        let patch = doc(
-            r#"{
+            }"#);
+        let patch = doc(r#"{
                 "title": "Hello!",
                 "phoneNumber": "+01-123-456-7890",
                 "author": {"familyName": null},
                 "tags": ["example"]
-            }"#,
-        );
+            }"#);
         let merged = merge_patch(target, &patch);
         // Note on key order: every key the patch touches is detached then
         // re-appended (mirrors upstream's DetachItemFromObject +
