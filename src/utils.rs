@@ -112,7 +112,7 @@ fn compare_pointer_segment(name: &str, segment: &str, case_sensitive: bool) -> b
             let matches = if case_sensitive {
                 name[ni] == seg[pi]
             } else {
-                name[ni].to_ascii_lowercase() == seg[pi].to_ascii_lowercase()
+                name[ni].eq_ignore_ascii_case(&seg[pi])
             };
             if !matches {
                 return false;
@@ -909,9 +909,9 @@ mod patch_tests {
 // `cJSONUtils_GenerateMergePatch` from cJSON_Utils.c.
 // ============================================================================
 
-/// (Reuses `encode_pointer_segment`, already defined above for
-/// `find_pointer_from_object_to`, to escape `~` and `/` in path segments -
-/// the inverse of `decode_pointer_segment` used by the apply side.)
+// (Reuses `encode_pointer_segment`, already defined above for
+// `find_pointer_from_object_to`, to escape `~` and `/` in path segments -
+// the inverse of `decode_pointer_segment` used by the apply side.)
 
 /// Appends one patch operation object to `patches`. Mirrors `compose_patch`
 /// (cJSON_Utils.c:1096-1134). `suffix`, if present, is a single raw
@@ -1131,7 +1131,7 @@ fn generate_merge_patch_inner(from: &Value, to: &Value, case_sensitive: bool) ->
     }
 
     match patch.as_object() {
-        Some(pairs) if pairs.is_empty() => None,
+        Some([]) => None,
         _ => Some(patch),
     }
 }
