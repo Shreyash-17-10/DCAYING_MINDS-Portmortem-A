@@ -440,6 +440,7 @@ fn compare_double(a: f64, b: f64) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::approx_constant)]
 mod tests {
     use super::*;
 

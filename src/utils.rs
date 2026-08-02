@@ -176,6 +176,7 @@ fn encode_pointer_segment(key: &str) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::approx_constant)]
 mod tests {
     use super::*;
     use crate::parse::parse;
@@ -665,16 +666,18 @@ fn merge_patch_inner(target: Value, patch: &Value, case_sensitive: bool) -> Valu
         Value::object()
     };
 
-    for (key, patch_child) in patch_pairs {
+for (key, patch_child) in patch_pairs.iter().cloned() {
         if patch_child.is_null() {
             // RFC 7396: null in the patch means "delete this key".
             target.object_delete(key, case_sensitive);
         } else {
             let existing = target
-                .object_detach(key, case_sensitive)
-                .unwrap_or(Value::Null);
-            let merged = merge_patch_inner(existing, patch_child, case_sensitive);
-            let _ = target.object_push(key.clone(), merged);
+let existing = target
+    .object_detach(&key, case_sensitive)
+    .unwrap_or(Value::Null);
+
+let merged = merge_patch_inner(existing, &patch_child, case_sensitive);
+let _ = target.object_push(key, merged);
         }
     }
 

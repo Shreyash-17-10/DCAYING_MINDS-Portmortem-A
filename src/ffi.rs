@@ -116,6 +116,7 @@ pub unsafe extern "C" fn cjson_rs_free_string(s: *mut c_char) {
 }
 
 #[cfg(test)]
+#[allow(clippy::approx_constant)]
 mod tests {
     use super::*;
     use std::ffi::CString;

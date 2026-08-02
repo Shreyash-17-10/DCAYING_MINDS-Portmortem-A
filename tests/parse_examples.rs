@@ -30,6 +30,7 @@ fn read_fixture(name: &str) -> String {
 /// exact byte-for-byte match against the `.expected` file.
 fn do_test(test_name: &str) {
     let input = read_fixture(test_name);
+
     let expected = read_fixture(&format!("{test_name}.expected"));
 
     let tree = parse(&input).unwrap_or_else(|e| panic!("failed to parse {test_name}: {e:?}"));
@@ -37,9 +38,14 @@ fn do_test(test_name: &str) {
     let actual = cjson_rs::print::print(&tree)
         .unwrap_or_else(|e| panic!("failed to print {test_name}: {e:?}"));
 
-    let actual_norm = actual.replace("\r\n", "\n");
-    let expected_norm = expected.replace("\r\n", "\n");
-    assert_eq!(expected_norm, actual_norm, "mismatch for {test_name}");
+let actual_norm = actual.replace("\r\n", "\n");
+let expected_norm = expected.replace("\r\n", "\n");
+
+assert_eq!(
+    expected_norm,
+    actual_norm,
+    "mismatch for {test_name}"
+);
 }
 
 #[test]

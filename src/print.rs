@@ -107,9 +107,7 @@ fn print_object(
     let depth = depth + 1;
     for (i, (key, val)) in pairs.iter().enumerate() {
         if format {
-            for _ in 0..depth {
-                out.push('\t');
-            }
+out.extend(std::iter::repeat_n('\t', depth));
         }
         print_string_ptr(key, out);
         out.push(':');
@@ -125,9 +123,7 @@ fn print_object(
         }
     }
     if format {
-        for _ in 0..depth - 1 {
-            out.push('\t');
-        }
+out.extend(std::iter::repeat_n('\t', depth - 1));
     }
     out.push('}');
     Ok(())
@@ -258,10 +254,10 @@ fn format_g(d: f64, sig_digits: usize) -> String {
         body
     }
 }
-
 #[cfg(test)]
 #[allow(clippy::approx_constant, clippy::excessive_precision)]
 mod tests {
+
     use super::*;
 
     // --- print_number: vectors lifted directly from upstream's
@@ -293,9 +289,9 @@ mod tests {
         assert_eq!(print_number(10e11), "1000000000000");
         assert_eq!(print_number(123e+127), "1.23e+129");
         assert_eq!(print_number(123e-128), "1.23e-126");
-        assert_eq!(print_number(3.1415926535897931), "3.1415926535897931");
+        let value = "3.1415926535897931".parse::<f64>().unwrap();
+        assert_eq!(print_number(value), "3.1415926535897931");
     }
-
     #[test]
     fn number_negative_reals() {
         assert_eq!(print_number(-0.0123), "-0.0123");
