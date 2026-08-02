@@ -66,24 +66,43 @@ not just warns) across the library, all integration tests, and benchmarks.
 ## GUI
 
 A small split-screen terminal-style web GUI for visually comparing the
-original C output against this Rust port side by side.
+original C output against this Rust port side by side, with a live
+in-browser WebAssembly build of this crate for the interactive
+parse/print/validate panels.
 
 ```bash
 ./run_gui.sh
 ```
 
-This starts a zero-dependency Python HTTP server (`gui/server.py`) on
-`http://localhost:8080` and opens it in your browser. The left panel
-represents the original `cJSON.c`, the right panel this port
-(`cjson-rs`); `/api/run_diff` triggers the compiled `differential/diff_test`
-binary against `differential/corpus/` and streams its real output into the
-page.
+### Building the WebAssembly engine (`gui/cjson_rs.wasm`)
+
+The interactive panels load a WebAssembly build of this crate directly —
+no `wasm-bindgen`/`wasm-pack` glue; `gui/app.js` calls the raw `extern "C"`
+exports (`wasm_alloc`, `wasm_validate_json`, `wasm_print_unformatted`, etc.,
+defined in `src/wasm.rs`) via `WebAssembly.instantiate` and manual linear
+memory management, matching the hand-rolled alloc/dealloc pattern in that
+file. To rebuild `gui/cjson_rs.wasm` from source:
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo build --release --target wasm32-unknown-unknown
+cp target/wasm32-unknown-unknown/release/cjson_rs.wasm gui/cjson_rs.wasm
+```
+
+This uses the `cdylib` crate-type already declared in `Cargo.toml`'s `[lib]`
+section (alongside `rlib`, for normal Rust deps, and `staticlib`, for the C
+differential harness) — no extra target-specific configuration is needed.
 
 **Note:** if `differential/diff_test` hasn't been built yet (see
 [Differential testing](#differential-testing) above), the GUI falls back to
 a "Client-Side Interactive Simulation" placeholder message rather than
 failing outright — this is a static demo string, not a live result. Build
 `diff_test` first if you want the GUI showing real, freshly-executed output.
+Likewise, the GUI's "run full suite" execution log (counts, per-test
+timings) is illustrative/representational content for demonstration
+purposes, not measurements taken live in the browser — the verified numbers
+are the ones in this README and `DECISIONS.md`, produced by actually running
+`cargo test`, `cargo bench`, and the `differential/` harnesses.
 
 
 ## Benchmark
