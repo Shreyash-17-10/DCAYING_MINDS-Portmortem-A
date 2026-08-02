@@ -12,6 +12,11 @@
 //! Memory ownership contract (mirrors cJSON's own alloc/free pairing):
 //! - `cjson_rs_parse` returns an opaque `*mut Value` owned by the caller.
 //!   It must be released with `cjson_rs_free`, exactly once.
+//! - `cjson_rs_generate_patch` also returns a caller-owned `*mut Value`
+//!   (the generated patch is itself just an `Array` `Value`, freed the same
+//!   way as any other parsed handle - `cjson_rs_free`). It borrows `from`
+//!   and `to` for the duration of the call only; neither input handle is
+//!   consumed or freed by this function.
 //! - `cjson_rs_print` / `cjson_rs_print_unformatted` return a `*mut c_char`
 //!   owned by the caller. It must be released with `cjson_rs_free_string`,
 //!   exactly once — never with libc `free()`, since the allocation was made
@@ -26,6 +31,7 @@ use std::ptr;
 
 use crate::parse::parse as parse_json;
 use crate::print::{print, print_unformatted};
+use crate::utils::generate_patch_case_sensitive;
 use crate::value::Value;
 
 /// Parses a NUL-terminated UTF-8 JSON string. Returns an opaque handle owned
@@ -87,6 +93,26 @@ pub unsafe extern "C" fn cjson_rs_print_unformatted(handle: *const Value) -> *mu
         Some(cstr) => cstr.into_raw(),
         None => ptr::null_mut(),
     }
+}
+
+/// Generates an RFC 6902 JSON Patch document (an array of operations) that,
+/// applied to `from`, produces `to`. Case-sensitive object key matching.
+/// Returns an opaque handle owned by the caller (free with `cjson_rs_free`,
+/// same as a parsed value - a generated patch is just an `Array` `Value`),
+/// or NULL if either input handle is NULL.
+/// Mirrors `cJSONUtils_GeneratePatchesCaseSensitive` (cJSON_Utils.c:1296).
+///
+/// # Safety
+/// `from` and `to` must each be either NULL or a live pointer previously
+/// returned by `cjson_rs_parse` (or another cjson-rs handle-returning
+/// function) that has not yet been freed.
+#[no_mangle]
+pub unsafe extern "C" fn cjson_rs_generate_patch(from: *const Value, to: *const Value) -> *mut Value {
+    if from.is_null() || to.is_null() {
+        return ptr::null_mut();
+    }
+    let patch = generate_patch_case_sensitive(&*from, &*to);
+    Box::into_raw(Box::new(patch))
 }
 
 /// Releases a handle returned by `cjson_rs_parse`. Mirrors `cJSON_Delete`.
@@ -156,6 +182,40 @@ mod tests {
             let input = CString::new("{not valid json").unwrap();
             let handle = cjson_rs_parse(input.as_ptr());
             assert!(handle.is_null());
+        }
+    }
+
+    #[test]
+    fn generate_patch_through_the_c_abi() {
+        unsafe {
+            let from = CString::new(r#"{"a":1}"#).unwrap();
+            let to = CString::new(r#"{"a":2}"#).unwrap();
+            let from_handle = cjson_rs_parse(from.as_ptr());
+            let to_handle = cjson_rs_parse(to.as_ptr());
+            assert!(!from_handle.is_null() && !to_handle.is_null());
+
+            let patch_handle = cjson_rs_generate_patch(from_handle, to_handle);
+            assert!(!patch_handle.is_null());
+
+            let printed = cjson_rs_print_unformatted(patch_handle);
+            assert!(!printed.is_null());
+            let out = CStr::from_ptr(printed).to_str().unwrap();
+            assert_eq!(out, r#"[{"op":"replace","path":"/a","value":2}]"#);
+
+            cjson_rs_free_string(printed);
+            cjson_rs_free(patch_handle);
+            cjson_rs_free(from_handle);
+            cjson_rs_free(to_handle);
+        }
+    }
+
+    #[test]
+    fn generate_patch_with_null_inputs_returns_null() {
+        unsafe {
+            let handle = cjson_rs_parse(CString::new("{}").unwrap().as_ptr());
+            assert!(cjson_rs_generate_patch(ptr::null(), handle).is_null());
+            assert!(cjson_rs_generate_patch(handle, ptr::null()).is_null());
+            cjson_rs_free(handle);
         }
     }
 }
