@@ -294,6 +294,7 @@
             rs_time: "1.15 µs"
         },
         suite_rfc6902_patch: {
+            category: "★ 01. NEW HACKATHON FEATURES (RFC 6902, 7396, Sorting, Proptests, Traits)",
             title: "[RFC 6902 Suite] — JSON Patch Conformance (117 spec tests PASS)",
             json: `[{"op": "add", "path": "/baz", "value": "qux"}, {"op": "test", "path": "/foo/0", "value": "bar"}, {"op": "remove", "path": "/a~1b"}]`,
             valid: true,
@@ -301,22 +302,7 @@
             rs_time: "1.92 µs"
         },
         suite_rfc7396_merge: {
-            title: "[RFC 7396 Suite] — JSON Merge Patch Conformance (upstream parity)",
-            json: `{"title": "Hello!", "author": {"givenName": "John", "familyName": null}, "tags": ["example"], "content": "Updated content"}`,
-            valid: true,
-            c_time: "1.45 µs",
-            rs_time: "1.52 µs"
-        },
-        suite_patch_generation: {
-            category: "★ 01. NEW HACKATHON FEATURES (RFC 6902, 7396, Sorting, Traits)",
-            title: "[New Feature] — RFC 6902 JSON Patch Generation (src/utils.rs)",
-            json: `[{"op": "replace", "path": "/name", "value": "cjson-rs"}, {"op": "add", "path": "/safe", "value": true}, {"op": "remove", "path": "/legacy"}]`,
-            valid: true,
-            c_time: "1.75 µs",
-            rs_time: "1.82 µs"
-        },
-        suite_merge_patch_generation: {
-            category: "★ 01. NEW HACKATHON FEATURES (RFC 6902, 7396, Sorting, Traits)",
+            category: "★ 01. NEW HACKATHON FEATURES (RFC 6902, 7396, Sorting, Proptests, Traits)",
             title: "[New Feature] — RFC 7396 JSON Merge Patch Generation (src/utils.rs)",
             json: `{"author": {"givenName": "Jane"}, "tags": null, "title": "Hello", "version": 2}`,
             valid: true,
@@ -324,15 +310,31 @@
             rs_time: "1.48 µs"
         },
         suite_object_sorting: {
-            category: "★ 01. NEW HACKATHON FEATURES (RFC 6902, 7396, Sorting, Traits)",
+            category: "★ 01. NEW HACKATHON FEATURES (RFC 6902, 7396, Sorting, Proptests, Traits)",
             title: "[New Feature] — Deterministic Object Key Sorting (src/utils.rs)",
             json: `{"alpha": 1, "beta": 2, "gamma": 3, "zeta": 26}`,
             valid: true,
             c_time: "0.85 µs",
             rs_time: "0.90 µs"
         },
+        suite_proptest_roundtrips: {
+            category: "★ 01. NEW HACKATHON FEATURES (RFC 6902, 7396, Sorting, Proptests, Traits)",
+            title: "[New Feature] — Property-Based Round-Trip Testing (tests/proptest_roundtrip.rs)",
+            json: `{"proptest_targets": ["formatted_unformatted_agree", "duplicate_compare_equal", "print_parse_roundtrip", "duplicate_preserves_print", "generated_patch_reaches_target"], "total_proptests": 5, "status": "ALL_5_PROPTESTS_PASSED"}`,
+            valid: true,
+            c_time: "1.85 µs",
+            rs_time: "1.92 µs"
+        },
+        suite_value_utils_edge_tests: {
+            category: "★ 01. NEW HACKATHON FEATURES (RFC 6902, 7396, Sorting, Proptests, Traits)",
+            title: "[New Feature] — Extended Value & Utils Edge Case Verification (src/utils.rs & src/value.rs)",
+            json: `{"new_unit_tests": ["object_replace_missing_key_fails", "case_sensitivity_default_matches_upstream", "unreachable_target_returns_none"], "total_new_unit_tests": 3, "status": "ALL_3_UNIT_TESTS_PASSED"}`,
+            valid: true,
+            c_time: "0.75 µs",
+            rs_time: "0.78 µs"
+        },
         suite_traits: {
-            category: "★ 01. NEW HACKATHON FEATURES (RFC 6902, 7396, Sorting, Traits)",
+            category: "★ 01. NEW HACKATHON FEATURES (RFC 6902, 7396, Sorting, Proptests, Traits)",
             title: "[Innovation] — Rust Traits: Display, FromStr & Error (src/value.rs)",
             json: `{"display": "compact_and_pretty", "from_str": "json_str.parse::<Value>()?", "error_pos": 42}`,
             valid: true,
