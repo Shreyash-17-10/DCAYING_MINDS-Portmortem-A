@@ -5,6 +5,8 @@ Architectural decisions, trade-offs, and known gaps in this port of
 contributors) from C to Rust. Written phase-by-phase to match how the port
 was actually built; see the roadmap discussion for the phase breakdown.
 
+# Git commit messages  
+  
 ## 1. Scope and status
 
 | Original file | Rust module | Status |
