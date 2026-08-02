@@ -6,6 +6,7 @@ contributors (MIT licensed). Built for **Port Mortem 2026**, part of the
 [Code Resurrection Hackathon](https://coderesurrection.com/2026) — C → Rust
 migration track.
 
+
 This is a genuine port, not a wrapper: there is no `unsafe extern "C"` call
 into the original `cJSON.c` anywhere in the library itself. The original C
 source is kept in `original_c_reference/` purely for license attribution
@@ -39,17 +40,51 @@ Produces `target/release/libcjson_rs.a` (static), `libcjson_rs.so`
 cargo test
 ```
 
-Runs 112 unit tests (co-located with each module) plus three integration
+Runs 126 unit tests (co-located with each module) plus four integration
 test files: `tests/parse_examples.rs` (15 tests, using the original cJSON
 `tests/inputs/test1..test11` fixtures copied verbatim, parse → print →
 byte-exact match against upstream's own `.expected` outputs),
 `tests/json_pointer_examples.rs` (the RFC 6901 conformance case ported from
-upstream's `old_utils_tests.c`), and `tests/json_patch_conformance.rs`
+upstream's `old_utils_tests.c`), `tests/json_patch_conformance.rs`
 (the official [json-patch-tests](https://github.com/json-patch/json-patch-tests)
 RFC 6902 conformance suite — `tests.json`, `spec_tests.json`,
 `cjson-utils-tests.json`, copied verbatim from upstream — **121 cases total,
-4 disabled matching upstream's own flags, 117/117 active cases pass**).
-131 tests total, all passing.
+4 disabled matching upstream's own flags, 117/117 active cases pass**),
+and `tests/proptest_roundtrip.rs` (5 property-based tests generating
+random `Value` trees — parse/print round-tripping, patch generation
+correctness, and more — run at 5,000 cases each for this submission,
+25,000 total assertions; see [DECISIONS.md §9b](./DECISIONS.md#9b-property-based-testing-testsproptest_roundtriprs)
+for two genuine edge cases this surfaced, both independently verified
+against the real `cJSON.c` to be shared upstream characteristics, not
+divergences).
+
+**150 tests total, all passing.**
+
+Linting: `cargo clippy --all-targets -- -D warnings` passes clean (denies,
+not just warns) across the library, all integration tests, and benchmarks.
+
+## GUI
+
+A small split-screen terminal-style web GUI for visually comparing the
+original C output against this Rust port side by side.
+
+```bash
+./run_gui.sh
+```
+
+This starts a zero-dependency Python HTTP server (`gui/server.py`) on
+`http://localhost:8080` and opens it in your browser. The left panel
+represents the original `cJSON.c`, the right panel this port
+(`cjson-rs`); `/api/run_diff` triggers the compiled `differential/diff_test`
+binary against `differential/corpus/` and streams its real output into the
+page.
+
+**Note:** if `differential/diff_test` hasn't been built yet (see
+[Differential testing](#differential-testing) above), the GUI falls back to
+a "Client-Side Interactive Simulation" placeholder message rather than
+failing outright — this is a static demo string, not a live result. Build
+`diff_test` first if you want the GUI showing real, freshly-executed output.
+
 
 ## Benchmark
 
@@ -81,6 +116,44 @@ inputs (11 original fixtures + 11 handwritten edge cases: unicode surrogate
 pairs, extreme numbers, invalid input, deep nesting, duplicate keys), and
 checks byte-identical output. Last run: **22/22 matched, 0 mismatches.**
 
+A second harness cross-validates JSON Patch *generation* against the real
+upstream library:
+
+```bash
+cd differential
+gcc -O2 diff_generate_test.c ../original_c_reference/cJSON.c \
+    ../original_c_reference/cJSON_Utils.c \
+    ../target/release/libcjson_rs.a \
+    -I../original_c_reference -I../ffi_include \
+    -lpthread -ldl -lm -o diff_generate_test
+./diff_generate_test
+```
+
+Generates a patch with this Rust port, then applies that Rust-generated
+patch using the real, unmodified upstream `cJSONUtils_ApplyPatchesCaseSensitive`,
+and confirms the result matches the intended target via the real
+`cJSON_Compare` — proving Rust-generated patches are genuinely interoperable
+with the original C library, not just self-consistent. Last run: **10/10
+matched, 0 mismatches.**
+
+## Property-based testing
+
+```bash
+cargo test --test proptest_roundtrip
+# or, for a much stronger run (slower):
+PROPTEST_CASES=5000 cargo test --test proptest_roundtrip --release
+```
+
+5 properties generating random `Value` trees (bounded depth/size), checking
+print/parse round-tripping, formatted/unformatted agreement,
+duplicate/compare consistency, and generate-then-apply-patch correctness.
+Runs on stable Rust — no `cargo-fuzz`/nightly needed. See
+[DECISIONS.md §9b](./DECISIONS.md#9b-property-based-testing-testsproptest_roundtriprs)
+for two genuine edge cases this surfaced during development, both traced
+to root cause and independently confirmed — by compiling and running the
+actual unmodified `cJSON.c` — to be shared characteristics of the
+algorithm itself, not divergences this port introduced.
+
 ## Fuzzing
 
 ```bash
@@ -99,7 +172,8 @@ evidence of correctness in the meantime).
 ## FFI / calling from C
 
 `src/ffi.rs` exposes a small C ABI (`cjson_rs_parse`, `cjson_rs_print`,
-`cjson_rs_print_unformatted`, `cjson_rs_free`, `cjson_rs_free_string`) —
+`cjson_rs_print_unformatted`, `cjson_rs_generate_patch`, `cjson_rs_free`,
+`cjson_rs_free_string`) —
 see `ffi_include/cjson_rs.h` for the header (hand-written; regenerate
 automatically anytime with `cbindgen --config cbindgen.toml --output
 ffi_include/cjson_rs_generated.h` if you have
@@ -131,14 +205,17 @@ tests/
   parse_examples.rs           — ported from cJSON's parse_examples.c
   json_pointer_examples.rs    — ported from cJSON's old_utils_tests.c
   json_patch_conformance.rs   — official RFC 6902 json-patch-tests suite
+  proptest_roundtrip.rs       — property-based tests (stable Rust, no nightly needed)
   fixtures/inputs/            — original cJSON test fixtures, unmodified
   fixtures/json-patch-tests/  — official JSON Patch conformance suite, unmodified
 benches/
   parse_print.rs   — criterion benchmarks
   c_bench/         — companion C benchmark against original cJSON.c
 differential/
-  diff_test.c   — C↔Rust differential testing harness
-  corpus/        — test inputs (originals + adversarial edge cases)
+  diff_test.c            — C↔Rust differential testing harness (parse/print)
+  diff_generate_test.c   — cross-implementation test: Rust-generated
+                            patches applied by the real upstream C library
+  corpus/                — test inputs (originals + adversarial edge cases)
 fuzz/
   fuzz_targets/cjson_read_fuzzer.rs — cargo-fuzz target (ported from C)
 original_c_reference/

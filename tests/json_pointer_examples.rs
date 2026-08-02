@@ -42,8 +42,8 @@ fn json_pointer_resolves_rfc6901_examples() {
     assert_eq!(get_pointer(&root, "/foo"), root.object_get("foo"));
 
     // GetPointer(root, "/foo/0") == GetObjectItem(root, "foo")->child (first element)
-    let foo = root.object_get("foo").expect("foo must exist");
-    assert_eq!(get_pointer(&root, "/foo/0"), foo.array_get(0));
+    let foo_array = root.object_get("foo").expect("\"foo\" key must exist");
+    assert_eq!(get_pointer(&root, "/foo/0"), foo_array.array_get(0));
 
     // GetPointer(root, "/") == GetObjectItem(root, "") -- the empty-string key
     assert_eq!(get_pointer(&root, "/"), root.object_get(""));

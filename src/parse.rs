@@ -211,6 +211,10 @@ mod tests {
     }
 
     #[test]
+    // 3.1416 here is a deliberate JSON-parsing precision test value (also
+    // used verbatim in cJSON's own test suite), not an attempted PI
+    // literal - clippy can't tell those apart.
+    #[allow(clippy::approx_constant)]
     fn number_decimals_and_exponents() {
         assert_eq!(parse_number(b"1.5"), Some((1.5, 3)));
         assert_eq!(parse_number(b"3.1416"), Some((3.1416, 6)));
@@ -591,6 +595,9 @@ mod value_parser_tests {
     }
 
     #[test]
+    // -3.14 is a plain decimal-parsing test value, not an attempted PI
+    // literal - see the same note on number_decimals_and_exponents above.
+    #[allow(clippy::approx_constant)]
     fn parses_scalar_string_and_number() {
         assert_eq!(parse("\"hi\"").unwrap(), Value::String("hi".to_string()));
         assert_eq!(parse("42").unwrap(), Value::Number(42.0));

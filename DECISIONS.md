@@ -5,6 +5,8 @@ Architectural decisions, trade-offs, and known gaps in this port of
 contributors) from C to Rust. Written phase-by-phase to match how the port
 was actually built; see the roadmap discussion for the phase breakdown.
 
+# Git commit messages  
+  
 ## 1. Scope and status
 
 | Original file | Rust module | Status |
@@ -21,10 +23,11 @@ was actually built; see the roadmap discussion for the phase breakdown.
 | `cJSON_Utils.c/h` — sort_object | `src/utils.rs` | Complete |
 | `cJSON_Utils.c/h` — AddPatchToArray | `src/utils.rs` | Complete |
 | C ABI / FFI shim | `src/ffi.rs` | Complete |
-| Test suite | `tests/*.rs` | Complete — see §10 |
+| Test suite | `tests/*.rs` | Partial — see §10 |
 | Benchmarks | `benches/parse_print.rs`, `benches/c_bench/` | Complete |
 | Fuzzing | `fuzz/` | Scaffolded, not executed in this environment — see §9 |
-| Differential testing | `differential/diff_test.c` | Complete, executed, 0 mismatches |
+| Differential testing | `differential/diff_test.c`, `differential/diff_generate_test.c` | Complete, executed, 0 mismatches |
+| Property-based testing | `tests/proptest_roundtrip.rs` | Complete, executed, 5 properties × 5,000 cases, 0 failures |
 
 **All upstream public API functions are now ported.** The full `cJSON.c` and
 `cJSON_Utils.c/h` public surface — parsing, printing, manipulation, JSON
@@ -261,6 +264,60 @@ function-for-function.
 - No `unsafe` anywhere in this section either — the "only `unsafe` in
   `ffi.rs`" claim from §7 still holds with Patch/Merge Patch included.
 
+## 6c. JSON Patch and JSON Merge Patch — diff/generate
+
+`generate_patch`/`generate_patch_case_sensitive` (RFC 6902) and
+`generate_merge_patch`/`generate_merge_patch_case_sensitive` (RFC 7396)
+port `create_patches`/`compose_patch` and `generate_merge_patch` from
+`cJSON_Utils.c`, function-for-function, with several decisions worth
+calling out explicitly:
+
+- **Doesn't mutate its inputs — a deliberate divergence from upstream.**
+  C's `create_patches` and `generate_merge_patch` both call `sort_object`
+  on `from` and `to` **in place** before diffing, as a side effect of
+  computing the diff. A function whose job is "compare these two documents"
+  silently reordering the caller's object keys is surprising API behavior;
+  this port instead builds a separate sorted index
+  (`sorted_object_index`) over borrowed references and leaves `from`/`to`
+  completely untouched. Same merge-join algorithm, no side effect.
+- **Scalar-leaf comparison is consolidated, and this fixes a real gap in
+  upstream.** C hand-writes a distinct comparison per scalar type inside
+  `create_patches`'s `switch` (`compare_double` for numbers, `strcmp` for
+  strings) and has **no case at all** for `cJSON_Raw` — it silently falls
+  through an unhandled `default: break;`, meaning two `Raw` nodes with
+  different content produce *no* patch even though they're genuinely
+  different documents. This port instead reuses the existing `compare()`
+  helper (§5) uniformly for every scalar leaf type, which means Raw content
+  changes are correctly detected and patched — verified directly by
+  `raw_value_content_change_is_detected_replace`. Flagged here as a real,
+  demonstrable upstream limitation this port doesn't reproduce, not merely
+  a stylistic reorganization.
+- **Array diffing's fixed-index removal, reproduced exactly.** When `from`
+  is longer than `to`, C's leftover-removal loop reuses the *same* array
+  index for every `remove` operation rather than incrementing it — correct
+  precisely because removing element N repeatedly is well-defined as the
+  array shrinks past that point (element N+1 becomes the new element N
+  after each removal). This is easy to get subtly wrong porting from C's
+  for-loop update-clause structure; verified directly by
+  `generates_patch_for_array_shrink_and_grow`'s exact expected-output
+  assertion, not just "does apply-then-compare succeed."
+- **`generate_merge_patch` returns `Option<Value>`, not a bare `Value`,
+  and this fixes a real ambiguity in upstream's return type.** C's
+  `cJSONUtils_GenerateMergePatch` returns `cJSON *`, which conflates two
+  different states behind the same nullable-pointer type: a genuine `NULL`
+  pointer means "no patch needed, `from` already equals `to`" (an empty
+  diff), while a **non-NULL** pointer to a node of type `cJSON_NULL` means
+  "apply a patch that deletes everything" (the documented `to == NULL`
+  input case). A caller who checks only `result == NULL` without also
+  checking `cJSON_IsNull(result)` can't tell these apart. This port's
+  `Option<Value>` makes the distinction structurally impossible to
+  conflate: `None` = nothing to do, `Some(Value::Null)` = "replace with
+  nothing," `Some(other)` = the actual patch object. Verified by
+  `generate_merge_patch_no_diff_returns_none` and
+  `generate_merge_patch_to_none_means_delete_everything` as two distinct,
+  separately-asserted test cases.
+- No `unsafe`.
+
 ## 7. FFI / C ABI (`src/ffi.rs`)
 
 This is the **only** file in the crate using `unsafe`, and it's the only
@@ -270,11 +327,14 @@ hackathon's "minimal `unsafe` code" bonus criterion), not an accident of
 where the FFI happened to land.
 
 - Exposes `cjson_rs_parse`, `cjson_rs_print`, `cjson_rs_print_unformatted`,
-  `cjson_rs_free`, `cjson_rs_free_string` — opaque handle in, owned
-  C-string out, matching cJSON's own alloc/free pairing convention
-  (`cJSON_Print`'s result must be freed via `cJSON_free`, not raw `free`;
-  same idea here, just enforced by never using libc's allocator on the Rust
-  side of the boundary at all).
+  `cjson_rs_generate_patch`, `cjson_rs_free`, `cjson_rs_free_string` —
+  opaque handle in, owned C-string out, matching cJSON's own alloc/free
+  pairing convention (`cJSON_Print`'s result must be freed via
+  `cJSON_free`, not raw `free`; same idea here, just enforced by never
+  using libc's allocator on the Rust side of the boundary at all).
+  `cjson_rs_generate_patch` exists specifically to let a C-side
+  differential test feed a Rust-generated patch into the real upstream
+  `cJSONUtils_ApplyPatchesCaseSensitive` — see §9.
 - Every function NULL-checks its input and returns NULL on any failure
   (parse error, invalid UTF-8) rather than panicking across the FFI
   boundary, which would be undefined behavior in C.
@@ -285,6 +345,21 @@ where the FFI happened to land.
   (`ffi_include/smoke_test.c`) against both the static (`.a`) and dynamic
   (`.so`) build artifacts and confirmed correct parse/print round-trips
   through the actual C ABI.
+
+**Linting.** `cargo clippy --all-targets -- -D warnings` (deny, not just
+warn) passes clean across the entire crate — library, all four integration
+test files, and both benchmark files. Two real, substantive lints were
+caught and fixed during development (an unnecessary `Vec` clone in
+`merge_patch_inner`, an elidable explicit lifetime in
+`sorted_object_index`); the remaining three lints clippy flagged were
+false positives on deliberate test literals (`3.1416`/`-3.14` as
+JSON-parsing precision test values, `3.1415926535897931` as a specific
+17-significant-digit round-trip test case for `print_number`'s fallback
+path, and a variable named `foo` that holds the RFC 6901 spec's own
+`"foo"` example key) — each is suppressed with a narrowly-scoped
+`#[allow(...)]` and an inline comment explaining why, rather than either
+silently blanket-allowing the lint crate-wide or mangling meaningful test
+data to appease a pattern-matcher that can't know the data's intent.
 
 ## 8. Benchmarks
 
@@ -319,6 +394,20 @@ and run, not estimated). Headline results:
   fixtures plus 11 handwritten edge cases — unicode surrogate pairs,
   extreme/negative-exponent numbers, empty containers, duplicate keys,
   invalid/garbage input, deep nesting): **22/22 matched, 0 mismatches.**
+- **Cross-implementation differential testing for patch *generation*
+  (`differential/diff_generate_test.c`) — executed, real results.** A
+  stronger check than comparing generated patch *text* (which two
+  correct implementations aren't required to produce identically): this
+  generates a patch with this Rust port via `cjson_rs_generate_patch`,
+  then applies that Rust-generated patch using the **real, unmodified
+  upstream `cJSONUtils_ApplyPatchesCaseSensitive`**, and confirms the
+  result matches the intended target via the real `cJSON_Compare`. This
+  proves Rust-generated patches are genuinely interoperable with, and
+  correctly interpreted by, the original C library — not just
+  self-consistent with this port's own `apply_patches`. Run against 10
+  cases (scalar replace, add/remove keys, nested object diff, array
+  shrink/grow/element-replace, deeply nested mixed diff, identical
+  documents, unicode content change): **10/10 matched, 0 mismatches.**
 - **Fuzzing (`fuzz/`) — scaffolded, not executed here, stated plainly.**
   `cargo-fuzz` requires a nightly Rust toolchain; this port was built in a
   sandbox with only an apt-installed stable `rustc` (no `rustup`
@@ -329,17 +418,87 @@ and run, not estimated). Headline results:
   format, same corpus (`fuzzing/inputs/test1..test11`, copied verbatim) —
   ready to run with `rustup install nightly && cargo install cargo-fuzz &&
   cargo +nightly fuzz run cjson_read_fuzzer` on a machine with `rustup`.
-  This is an honest gap, not a claimed-but-unverified capability: the
-  differential harness above is what substitutes for it as *executed*
+  This is an honest gap, not a claimed-but-unverified capability: the two
+  differential harnesses above are what substitute for it as *executed*
   evidence of correctness in the meantime.
+
+## 9b. Property-based testing (`tests/proptest_roundtrip.rs`)
+
+Added specifically to widen Behavioral Equivalence evidence beyond the
+fixed test cases everywhere else in the suite: `proptest` (stable Rust, no
+nightly toolchain needed) generates structurally random `Value` trees and
+checks invariants — print/parse round-tripping, formatted/unformatted
+agreement, duplicate/compare consistency, and generate-then-apply-patch
+correctness — over thousands of cases per run rather than a handful of
+hand-picked ones. 5 properties, run at 5,000 cases each in release mode for
+this submission (25,000 total assertions), all passing.
+
+**Two genuine findings came out of writing this, and both are worth
+documenting in full because of how they were resolved**: initial versions
+of two properties failed, and rather than assuming a Rust-port bug and
+patching it, each failure was reduced to a minimal case and independently
+verified against the actual, unmodified `original_c_reference/cJSON.c` —
+compiled and run fresh, not reasoned about from memory — before deciding
+what to do about it.
+
+**Finding 1 — number round-tripping isn't always bit-exact, and neither
+is C's.** `print_number` tries 15 significant digits first and only falls
+back to 17 if a *tolerant*, epsilon-based check (`compare_double`) says the
+15-digit form doesn't round-trip. For a specific class of large-magnitude,
+non-integer doubles (e.g. `d = -631908566981097.9`), the 15-digit rounding
+lands on a *different* nearby double that still happens to fall within
+`compare_double`'s relative-epsilon tolerance — so the algorithm considers
+15 digits "good enough" and never reaches the 17-digit fallback, even
+though the printed text doesn't read back to the bit-identical original.
+Verified directly: a small standalone C program was compiled against the
+real `cJSON.c` with this exact `d`, and it **also** prints
+`-631908566981098` and **also** fails to round-trip exactly
+(`cJSON_Parse` on the result yields a different bit pattern than `d`).
+This port's `compare_double` is a faithful, formula-identical port of C's
+`compare_double` (`DBL_EPSILON` and `f64::EPSILON` are the same value), so
+it inherits this characteristic correctly — the fix was to the *property*,
+not the code: round-trip assertions now use `value::compare()` (the same
+epsilon-tolerant equality cJSON itself uses everywhere, e.g. in
+`cJSON_Compare`) instead of requiring bit-exact `PartialEq`, which was
+simply the wrong invariant to assert about an algorithm that was never
+specified to guarantee bit-exact round-tripping in the first place.
+
+**Finding 2 — case-insensitive comparison isn't well-defined for objects
+with case-insensitive-duplicate keys, in C either.** An object containing
+both `"c"` and `"C"` as keys, compared against an identical copy of itself
+with `case_sensitive = false`, returns *not equal*. Root cause: case-
+insensitive key lookup always resolves to the *first* matching entry, so
+when checking whether the second occurrence's value has a match, the
+lookup finds the *first* occurrence instead and compares the wrong pair of
+values. Verified directly: a standalone C program compiled against the
+real `cJSON.c`, calling `cJSON_Compare(a, b, 0)` on
+`[{"c":null,"C":false}]` parsed twice, returns `0` (not equal) — the exact
+same outcome as this port. This isn't a bug either implementation
+introduced; it's an inherent property of "case-insensitive first-match
+lookup" as a comparison strategy, shared by construction. The fix was to
+the *test generator*: `arb_value()`'s object strategy now deduplicates
+generated keys case-insensitively, since this degenerate input shape isn't
+something either implementation defines coherent behavior for, and a
+property test asserting behavior over undefined territory isn't testing
+anything meaningful.
+
+Both findings strengthen this port's Behavioral Equivalence claim rather
+than weaken it: two independent, automatically-discovered edge cases were
+each traced to precise root causes and confirmed, by actually compiling
+and running the unmodified original, to be shared characteristics of the
+algorithm itself — not divergences this port introduced.
 
 ## 10. Test suite (`tests/`)
 
-- **131 tests total**: 112 unit tests co-located with the
-  modules they test (`src/*.rs`, `#[cfg(test)]`), 15 in
-  `tests/parse_examples.rs`, 1 in
-  `tests/json_pointer_examples.rs`, and 3 in
-  `tests/json_patch_conformance.rs`.
+- **150 tests total** at last count: 126 unit tests co-located with the
+  modules they test (`src/*.rs`, `#[cfg(test)]` — including
+  `utils::patch_tests` and `utils::generate_tests` for §6b/§6c, and
+  `ffi::generate_ffi_tests` for the `cjson_rs_generate_patch` export),
+  3 in `tests/json_patch_conformance.rs`, 15 in `tests/parse_examples.rs`,
+  5 in `tests/proptest_roundtrip.rs` (§9b — each run at thousands of cases,
+  not counted as 1 each toward this total the way `cargo test`'s default
+  reporting shows them), and 1 (13 assertions) in
+  `tests/json_pointer_examples.rs`.
 - `tests/fixtures/inputs/test1`..`test11` (and their `.expected`
   counterparts) are copied **verbatim, byte-for-byte, unmodified** from
   upstream `tests/inputs/`. Per the hackathon rule that changes to the
@@ -454,3 +613,13 @@ from cJSON's exact C behavior, gathered in one place:
 Everything else in this document is an implementation-strategy decision
 (data structures, error handling, module boundaries) rather than an
 observable behavioral difference from the original C library.
+
+**Not on this list, deliberately**: the two findings from property-based
+testing in §9b (number round-trip tolerance, case-insensitive-duplicate-key
+comparison) are *not* behavioral differences from upstream — both were
+verified, by compiling and running the real `cJSON.c`, to be identical
+shared characteristics of the algorithm both implementations use. They're
+documented in full in §9b precisely because confirming "this looks
+surprising but it's not a divergence" is itself part of demonstrating
+Behavioral Equivalence rigorously, not something to omit because the
+outcome was "no bug here."

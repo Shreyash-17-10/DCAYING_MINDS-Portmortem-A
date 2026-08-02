@@ -13,6 +13,7 @@ typedef struct CJsonRsValue CJsonRsValue; /* opaque */
 CJsonRsValue *cjson_rs_parse(const char *json);
 char *cjson_rs_print(const CJsonRsValue *handle);
 char *cjson_rs_print_unformatted(const CJsonRsValue *handle);
+CJsonRsValue *cjson_rs_generate_patch(const CJsonRsValue *from, const CJsonRsValue *to);
 void cjson_rs_free(CJsonRsValue *handle);
 void cjson_rs_free_string(char *s);
 
