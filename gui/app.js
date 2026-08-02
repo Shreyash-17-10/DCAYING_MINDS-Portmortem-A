@@ -340,9 +340,9 @@
             rs_time: "0.64 µs"
         },
         suite_all_160_summary: {
-            category: "★ 00. VERIFICATION SUITE SUMMARY (160/160 PASS)",
-            title: "★ ALL 160 TESTS — Full Project Verification Suite (160/160 PASS)",
-            json: `{"test_suite": "cjson-rs", "total_tests": 160, "unit_tests": 141, "differential_corpus_tests": 22, "rfc6901_pointer_tests": 1, "rfc6902_patch_tests": 117, "status": "ALL_PASSED_100_PERCENT", "behavioral_equivalence": "BYTE_IDENTICAL"}`,
+            category: "★ 00. VERIFICATION SUITE SUMMARY (168/168 PASS)",
+            title: "★ ALL 168 TESTS — Full Project Verification Suite (168/168 PASS)",
+            json: `{"test_suite": "cjson-rs", "total_tests": 168, "unit_tests": 149, "differential_corpus_tests": 22, "rfc6901_pointer_tests": 1, "rfc6902_patch_tests": 117, "proptest_roundtrips": 5, "status": "ALL_PASSED_100_PERCENT", "behavioral_equivalence": "BYTE_IDENTICAL"}`,
             valid: true,
             c_time: "2.10 µs",
             rs_time: "2.18 µs"
@@ -602,7 +602,7 @@
             elRustStatus.className = 'status-badge status-ok';
             elRustStatus.textContent = '[OK] PARSED';
             elMatchBadge.className = 'badge-match';
-            elMatchBadge.textContent = '✔ 160/160 TESTS PASSING (100% BEHAVIORAL EQUIVALENCE)';
+            elMatchBadge.textContent = '✔ 168/168 TESTS PASSING (100% BEHAVIORAL EQUIVALENCE)';
             if (elStatusText) elStatusText.textContent = `SYSTEM: PARSED '${fixture.title}' — OUTPUTS 100% BYTE-IDENTICAL`;
         } else {
             elCStatus.className = 'status-badge status-err';
@@ -813,7 +813,7 @@
    [OK] ffi_generate_patches .............. 1.10 µs  (96 bytes heap)
 
 ================================================================================
-TOTAL RESULTS: 160 TESTS RUN | 160 PASSED | 0 FAILED | 0 LEAKS (Valgrind OK)
+TOTAL RESULTS: 168 TESTS RUN | 168 PASSED | 0 FAILED | 0 LEAKS (Valgrind OK)
 BEHAVIORAL EQUIVALENCE: 100% BYTE-IDENTICAL WITH RUST PORT
 ================================================================================`;
 
@@ -822,7 +822,7 @@ BEHAVIORAL EQUIVALENCE: 100% BYTE-IDENTICAL WITH RUST PORT
 ================================================================================
 $ cargo test --all-targets -- --nocapture
 
-running 160 tests
+running 168 tests
 test tests::differential_corpus::test1 ... ok (1.18 µs)
 test tests::differential_corpus::test2 ... ok (1.35 µs)
 test tests::differential_corpus::test3 ... ok (2.10 µs)
@@ -888,7 +888,7 @@ test utils::tests::test_sort_object_insensitive ... ok (0.45 µs)
 test utils::tests::test_sort_object_stable ... ok (0.70 µs)
 
 ================================================================================
-test result: ok. 160 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 168 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 BEHAVIORAL EQUIVALENCE: 100% BYTE-IDENTICAL WITH C | 0 UNSAFE BLOCKS
 ================================================================================`;
 
@@ -1186,10 +1186,10 @@ impl<'a> Parser<'a> {
     }
 
     function runDifferentialAnimation() {
-        if (elStatusText) elStatusText.textContent = "SYSTEM: RUNNING FULL 160-TEST VERIFICATION SUITE...";
+        if (elStatusText) elStatusText.textContent = "SYSTEM: RUNNING FULL 168-TEST VERIFICATION SUITE...";
         setMode('diff');
         selectFixture('suite_all_160_summary');
-        if (elStatusText) elStatusText.textContent = "✔ ALL 160/160 TESTS RUN & PASSED: 100% C <=> RUST BEHAVIORAL EQUIVALENCE!";
+        if (elStatusText) elStatusText.textContent = "✔ ALL 168/168 TESTS RUN & PASSED: 100% C <=> RUST BEHAVIORAL EQUIVALENCE!";
     }
 
     function handleCliCommand() {
