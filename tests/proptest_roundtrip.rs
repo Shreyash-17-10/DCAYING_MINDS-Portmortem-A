@@ -155,7 +155,7 @@ proptest! {
     /// keep the property meaningful independent of that generator detail.
     #[test]
     fn generated_patch_always_reaches_the_target(from in arb_value(), to in arb_value()) {
-        let patch = cjson_rs::utils::generate_patch_case_sensitive(&from, &to);
+        let patch = cjson_rs::utils::generate_patches_case_sensitive(&from, &to);
         let mut applied = from.clone();
         let result = cjson_rs::utils::apply_patches_case_sensitive(&mut applied, &patch);
         prop_assert!(result.is_ok(), "generated patch failed to apply: {:?}", result);

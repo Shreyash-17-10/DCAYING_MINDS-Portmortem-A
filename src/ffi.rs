@@ -31,7 +31,7 @@ use std::ptr;
 
 use crate::parse::parse as parse_json;
 use crate::print::{print, print_unformatted};
-use crate::utils::generate_patch_case_sensitive;
+use crate::utils::generate_patches_case_sensitive;
 use crate::value::Value;
 
 /// Parses a NUL-terminated UTF-8 JSON string. Returns an opaque handle owned
@@ -111,7 +111,7 @@ pub unsafe extern "C" fn cjson_rs_generate_patch(from: *const Value, to: *const 
     if from.is_null() || to.is_null() {
         return ptr::null_mut();
     }
-    let patch = generate_patch_case_sensitive(&*from, &*to);
+    let patch = generate_patches_case_sensitive(&*from, &*to);
     Box::into_raw(Box::new(patch))
 }
 
