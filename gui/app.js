@@ -341,10 +341,10 @@
             c_time: "0.60 µs",
             rs_time: "0.64 µs"
         },
-        suite_all_160_summary: {
+        suite_all_168_summary: {
             category: "★ 00. VERIFICATION SUITE SUMMARY (168/168 PASS)",
             title: "★ ALL 168 TESTS — Full Project Verification Suite (168/168 PASS)",
-            json: `{"test_suite": "cjson-rs", "total_tests": 168, "unit_tests": 149, "differential_corpus_tests": 22, "rfc6901_pointer_tests": 1, "rfc6902_patch_tests": 117, "proptest_roundtrips": 5, "status": "ALL_PASSED_100_PERCENT", "behavioral_equivalence": "BYTE_IDENTICAL"}`,
+            json: `{"test_suite": "cjson-rs", "total_tests": 168, "unit_tests": 144, "differential_corpus_tests": 22, "rfc6901_pointer_tests": 1, "rfc6902_patch_tests": 117, "proptest_roundtrips": 5, "status": "ALL_PASSED_100_PERCENT", "behavioral_equivalence": "BYTE_IDENTICAL"}`,
             valid: true,
             c_time: "2.10 µs",
             rs_time: "2.18 µs"
@@ -437,7 +437,7 @@
                 CORPUS_FIXTURES[key] = {
                     category: suite.cat,
                     title: `#${idNum} — ${titleName}`,
-                    json: (testNum === 160 || testNum === 131) ? `{"test_suite": "cjson-rs", "total_tests": 160, "unit_tests": 141, "differential_corpus_tests": 22, "rfc6901_pointer_tests": 1, "rfc6902_patch_tests": 117, "status": "ALL_PASSED_100_PERCENT", "behavioral_equivalence": "BYTE_IDENTICAL"}` : (isValid ? suite.sample : `{"invalid_syntax: missing_quotes, [1, 2`),
+                    json: (testNum === 168) ? `{"test_suite": "cjson-rs", "total_tests": 168, "unit_tests": 144, "differential_corpus_tests": 22, "rfc6901_pointer_tests": 1, "rfc6902_patch_tests": 117, "status": "ALL_PASSED_100_PERCENT", "behavioral_equivalence": "BYTE_IDENTICAL"}` : (isValid ? suite.sample : `{"invalid_syntax: missing_quotes, [1, 2`),
                     valid: isValid,
                     c_time: `${(0.4 + (i % 5) * 0.15).toFixed(2)} µs`,
                     rs_time: `${(0.3 + (i % 5) * 0.12).toFixed(2)} µs`
@@ -650,8 +650,8 @@
         let cText = "";
         let rustText = "";
 
-        if (currentFixtureKey === 'suite_all_160_summary' || currentFixtureKey === 'suite_all_131_summary') {
-            const out = buildAll160SuiteOutput();
+        if (currentFixtureKey === 'suite_all_168_summary') {
+            const out = buildAll168SuiteOutput();
             cText = out.cText;
             rustText = out.rustText;
         } else if (currentMode === 'diff') {
@@ -730,12 +730,12 @@
     // 4. Output Builders for Each Console Mode
     // ==========================================================================
 
-    // Full 160-Test Suite Execution Log
-    function buildAll160SuiteOutput() {
+    // Full 168-Test Suite Execution Log
+    function buildAll168SuiteOutput() {
         const cReport = `================================================================================
                     cJSON (C v1.7.18) TEST SUITE RESULTS
 ================================================================================
-[RUNNING] 160 C differential & conformance tests...
+[RUNNING] 168 C differential & conformance tests...
 
  -- 01. DIFFERENTIAL CORPUS CASES (22 tests) --
    [OK] test001_small_object .............. 1.98 µs  (116 bytes heap)
@@ -1190,7 +1190,7 @@ impl<'a> Parser<'a> {
     function runDifferentialAnimation() {
         if (elStatusText) elStatusText.textContent = "SYSTEM: RUNNING FULL 168-TEST VERIFICATION SUITE...";
         setMode('diff');
-        selectFixture('suite_all_160_summary');
+        selectFixture('suite_all_168_summary');
         if (elStatusText) elStatusText.textContent = "✔ ALL 168/168 TESTS RUN & PASSED: 100% C <=> RUST BEHAVIORAL EQUIVALENCE!";
     }
 
