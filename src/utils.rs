@@ -174,6 +174,7 @@ fn encode_pointer_segment(key: &str) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::approx_constant)]
 mod tests {
     use super::*;
     use crate::parse::parse;
@@ -344,6 +345,23 @@ pub enum PatchError {
     /// "this patch document is malformed".
     TestFailed,
 }
+
+impl std::fmt::Display for PatchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PatchError::MalformedPatch => write!(f, "malformed patch: missing \"path\""),
+            PatchError::InvalidOperation => write!(f, "invalid or missing \"op\""),
+            PatchError::MissingFrom => write!(f, "move/copy operation missing \"from\""),
+            PatchError::FromNotFound => write!(f, "\"from\" path not found in document"),
+            PatchError::MissingValue => write!(f, "add/replace operation missing \"value\""),
+            PatchError::PathNotFound => write!(f, "\"path\" not found in document"),
+            PatchError::ArrayIndexInvalid => write!(f, "array index out of bounds or malformed"),
+            PatchError::TestFailed => write!(f, "test operation failed: value mismatch"),
+        }
+    }
+}
+
+impl std::error::Error for PatchError {}
 
 enum PatchOp {
     Add,
@@ -633,7 +651,10 @@ fn merge_patch_inner(target: Value, patch: &Value, case_sensitive: bool) -> Valu
             // RFC 7396: null in the patch means "delete this key".
             target.object_delete(&key, case_sensitive);
         } else {
-            let existing = target.object_detach(&key, case_sensitive).unwrap_or(Value::Null);
+            let existing = target
+                .object_detach(&key, case_sensitive)
+                .unwrap_or(Value::Null);
+
             let merged = merge_patch_inner(existing, &patch_child, case_sensitive);
             let _ = target.object_push(key, merged);
         }
@@ -653,6 +674,292 @@ pub fn merge_patch(target: Value, patch: &Value) -> Value {
 pub fn merge_patch_case_sensitive(target: Value, patch: &Value) -> Value {
     merge_patch_inner(target, patch, true)
 }
+
+// ============================================================================
+// Phase 7: sort_object, JSON Patch generation (RFC 6902), and JSON Merge Patch
+// generation (RFC 7396). Closes the last functional gap vs upstream's public
+// API — see DECISIONS.md §1 (scope table) and §6b.
+// ============================================================================
+
+/// Sorts an object's keys alphabetically (case-insensitive). Mirrors
+/// `cJSONUtils_SortObject` (cJSON_Utils.c:1311-1314). If `value` is not an
+/// Object, this is a no-op (matching upstream's NULL-guard behavior).
+///
+/// Design note: C implements this as a merge sort over an intrusive doubly-
+/// linked list (`sort_list`, cJSON_Utils.c:484-593). Rust uses `Vec::sort_by`
+/// (a stable, adaptive merge sort on a contiguous slice) — identical
+/// stability guarantees, much less code, and better cache locality.
+pub fn sort_object(value: &mut Value) {
+    sort_object_inner(value, false);
+}
+
+/// Case-sensitive variant. Mirrors `cJSONUtils_SortObjectCaseSensitive`.
+pub fn sort_object_case_sensitive(value: &mut Value) {
+    sort_object_inner(value, true);
+}
+
+fn sort_object_inner(value: &mut Value, case_sensitive: bool) {
+    if let Value::Object(pairs) = value {
+        pairs.sort_by(|(a, _), (b, _)| {
+            if case_sensitive {
+                a.cmp(b)
+            } else {
+                a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase())
+            }
+        });
+    }
+}
+
+/// Builds a single JSON Patch operation object. Mirrors `compose_patch`
+/// (cJSON_Utils.c:1096-1134). Instead of C's manual `sprintf` path
+/// concatenation, this uses Rust's `format!` with `encode_pointer_segment`.
+fn compose_patch(patches: &mut Value, operation: &str, path: &str, suffix: Option<&str>, val: Option<&Value>) {
+    let mut patch = Value::object();
+    patch.object_push("op", Value::string(operation)).ok();
+
+    let full_path = match suffix {
+        None => path.to_string(),
+        Some(s) => format!("{}/{}", path, encode_pointer_segment(s)),
+    };
+    patch.object_push("path", Value::string(full_path)).ok();
+
+    if let Some(v) = val {
+        patch.object_push("value", v.duplicate(true)).ok();
+    }
+
+    patches.array_push(patch).ok();
+}
+
+/// Public utility for building patch array entries. Mirrors
+/// `cJSONUtils_AddPatchToArray` (cJSON_Utils.c:1136-1139).
+pub fn add_patch_to_array(array: &mut Value, operation: &str, path: &str, value: Option<&Value>) {
+    compose_patch(array, operation, path, None, value);
+}
+
+/// Recursive diff: produces a sequence of JSON Patch (RFC 6902) operations
+/// that transforms `from` into `to`. Mirrors `create_patches`
+/// (cJSON_Utils.c:1141-1279).
+///
+/// Key design difference from C: C's `create_patches` calls `sort_object`
+/// on its inputs, mutating them as a side-effect. This Rust version works
+/// on clones of the sorted pairs instead, avoiding mutation of the inputs
+/// — documented as an intentional divergence since the C behavior is a
+/// surprising side-effect callers shouldn't depend on (and upstream's own
+/// header warns "NOTE: This modifies objects in 'from' and 'to' by sorting
+/// the elements by their key").
+fn create_patches(patches: &mut Value, path: &str, from: &Value, to: &Value, case_sensitive: bool) {
+    // Different types → wholesale replace (cJSON_Utils.c:1148-1152).
+    if std::mem::discriminant(from) != std::mem::discriminant(to) {
+        compose_patch(patches, "replace", path, None, Some(to));
+        return;
+    }
+
+    match (from, to) {
+        (Value::Number(a), Value::Number(b)) => {
+            if !compare_double_patch(*a, *b) {
+                compose_patch(patches, "replace", path, None, Some(to));
+            }
+        }
+        (Value::String(a), Value::String(b)) | (Value::Raw(a), Value::Raw(b)) => {
+            if a != b {
+                compose_patch(patches, "replace", path, None, Some(to));
+            }
+        }
+        (Value::Bool(a), Value::Bool(b)) => {
+            if a != b {
+                compose_patch(patches, "replace", path, None, Some(to));
+            }
+        }
+        (Value::Array(from_items), Value::Array(to_items)) => {
+            // Elements present in both: recurse (cJSON_Utils.c:1177-1190).
+            let common_len = from_items.len().min(to_items.len());
+            for i in 0..common_len {
+                let new_path = format!("{}/{}", path, i);
+                create_patches(patches, &new_path, &from_items[i], &to_items[i], case_sensitive);
+            }
+
+            // Extra elements in `from` → remove. C removes at the same
+            // index repeatedly (because removal shifts elements), mirrored
+            // here by always removing at `common_len` (cJSON_Utils.c:1192-1205).
+            for _ in common_len..from_items.len() {
+                let idx_str = common_len.to_string();
+                compose_patch(patches, "remove", path, Some(&idx_str), None);
+            }
+
+            // Extra elements in `to` → add with "-" (append) token
+            // (cJSON_Utils.c:1207-1210).
+            for to_child in to_items.iter().skip(common_len) {
+                compose_patch(patches, "add", path, Some("-"), Some(to_child));
+            }
+        }
+        (Value::Object(_), Value::Object(_)) => {
+            // Sort both sides by key for the merge-walk (mirrors
+            // cJSON_Utils.c:1219-1220 calling sort_object on both).
+            // We clone + sort to avoid mutating the inputs.
+            let mut from_sorted = from.duplicate(true);
+            let mut to_sorted = to.duplicate(true);
+            sort_object_inner(&mut from_sorted, case_sensitive);
+            sort_object_inner(&mut to_sorted, case_sensitive);
+
+            let from_pairs = from_sorted.as_object().unwrap();
+            let to_pairs = to_sorted.as_object().unwrap();
+
+            let mut fi = 0;
+            let mut ti = 0;
+
+            while fi < from_pairs.len() || ti < to_pairs.len() {
+                let diff = if fi >= from_pairs.len() {
+                    1 // from exhausted, to has extra
+                } else if ti >= to_pairs.len() {
+                    -1 // to exhausted, from has extra
+                } else {
+                    let (ref fk, _) = from_pairs[fi];
+                    let (ref tk, _) = to_pairs[ti];
+                    if case_sensitive {
+                        fk.cmp(tk) as i32
+                    } else {
+                        fk.to_ascii_lowercase().cmp(&tk.to_ascii_lowercase()) as i32
+                    }
+                };
+
+                if diff == 0 {
+                    // Same key in both: recurse on value
+                    let (ref fk, ref fv) = from_pairs[fi];
+                    let (_, ref tv) = to_pairs[ti];
+                    let new_path = format!("{}/{}", path, encode_pointer_segment(fk));
+                    create_patches(patches, &new_path, fv, tv, case_sensitive);
+                    fi += 1;
+                    ti += 1;
+                } else if diff < 0 {
+                    // Key only in `from` → remove
+                    let (ref fk, _) = from_pairs[fi];
+                    compose_patch(patches, "remove", path, Some(fk), None);
+                    fi += 1;
+                } else {
+                    // Key only in `to` → add
+                    let (ref tk, ref tv) = to_pairs[ti];
+                    compose_patch(patches, "add", path, Some(tk), Some(tv));
+                    ti += 1;
+                }
+            }
+        }
+        // Null == Null, same-type scalars already handled above.
+        _ => {}
+    }
+}
+
+/// Relative-epsilon comparison matching cJSON's `compare_double`
+/// (cJSON.c:589-593). Duplicated here rather than importing from value.rs
+/// to keep module boundaries clean (same rationale as print.rs's copy).
+fn compare_double_patch(a: f64, b: f64) -> bool {
+    let max_val = a.abs().max(b.abs());
+    (a - b).abs() <= max_val * f64::EPSILON
+}
+
+/// Generates a JSON Patch (RFC 6902) document (an array of operations) that
+/// transforms `from` into `to`. Mirrors `cJSONUtils_GeneratePatches`
+/// (cJSON_Utils.c:1281-1294).
+///
+/// Returns a `Value::Array` of patch operation objects.
+pub fn generate_patches(from: &Value, to: &Value) -> Value {
+    let mut patches = Value::array();
+    create_patches(&mut patches, "", from, to, false);
+    patches
+}
+
+/// Case-sensitive variant. Mirrors `cJSONUtils_GeneratePatchesCaseSensitive`.
+pub fn generate_patches_case_sensitive(from: &Value, to: &Value) -> Value {
+    let mut patches = Value::array();
+    create_patches(&mut patches, "", from, to, true);
+    patches
+}
+
+// ============================================================================
+// JSON Merge Patch generation (RFC 7396). Mirrors `generate_merge_patch`
+// (cJSON_Utils.c:1391-1471).
+// ============================================================================
+
+fn generate_merge_patch_inner(from: &Value, to: &Value, case_sensitive: bool) -> Option<Value> {
+    // If either side is not an object, the patch is just a deep copy of `to`
+    // (cJSON_Utils.c:1401-1403).
+    if !to.is_object() || !from.is_object() {
+        return Some(to.duplicate(true));
+    }
+
+    // Sort both sides for the merge-walk (mirrors cJSON_Utils.c:1406-1407).
+    let mut from_sorted = from.duplicate(true);
+    let mut to_sorted = to.duplicate(true);
+    sort_object_inner(&mut from_sorted, case_sensitive);
+    sort_object_inner(&mut to_sorted, case_sensitive);
+
+    let from_pairs = from_sorted.as_object().unwrap();
+    let to_pairs = to_sorted.as_object().unwrap();
+
+    let mut patch = Value::object();
+    let mut fi = 0;
+    let mut ti = 0;
+
+    while fi < from_pairs.len() || ti < to_pairs.len() {
+        let diff = if fi < from_pairs.len() {
+            if ti < to_pairs.len() {
+                let (ref fk, _) = from_pairs[fi];
+                let (ref tk, _) = to_pairs[ti];
+                if case_sensitive {
+                    fk.cmp(tk) as i32
+                } else {
+                    fk.to_ascii_lowercase().cmp(&tk.to_ascii_lowercase()) as i32
+                }
+            } else {
+                -1
+            }
+        } else {
+            1
+        };
+
+        if diff < 0 {
+            // Key only in `from` → patch it to null (delete)
+            let (ref fk, _) = from_pairs[fi];
+            patch.object_push(fk.clone(), Value::Null).ok();
+            fi += 1;
+        } else if diff > 0 {
+            // Key only in `to` → add it
+            let (ref tk, ref tv) = to_pairs[ti];
+            patch.object_push(tk.clone(), tv.duplicate(true)).ok();
+            ti += 1;
+        } else {
+            // Same key in both → recurse if values differ
+            let (ref fk, ref fv) = from_pairs[fi];
+            let (_, ref tv) = to_pairs[ti];
+            if !compare(fv, tv, case_sensitive) {
+                if let Some(sub_patch) = generate_merge_patch_inner(fv, tv, case_sensitive) {
+                    patch.object_push(fk.clone(), sub_patch).ok();
+                }
+            }
+            fi += 1;
+            ti += 1;
+        }
+    }
+
+    if patch.as_object().is_none_or(|p| p.is_empty()) {
+        None
+    } else {
+        Some(patch)
+    }
+}
+
+/// Generates an RFC 7396 JSON Merge Patch that transforms `from` into `to`.
+/// Returns `None` if the two documents are identical (matching upstream's
+/// NULL return for "no patch needed"). Mirrors `cJSONUtils_GenerateMergePatch`
+/// (cJSON_Utils.c:1473-1476).
+pub fn generate_merge_patch(from: &Value, to: &Value) -> Option<Value> {
+    generate_merge_patch_inner(from, to, false)
+}
+
+/// Case-sensitive variant. Mirrors `cJSONUtils_GenerateMergePatchCaseSensitive`.
+pub fn generate_merge_patch_case_sensitive(from: &Value, to: &Value) -> Option<Value> {
+    generate_merge_patch_inner(from, to, true)
+}
+
 
 #[cfg(test)]
 mod patch_tests {
@@ -900,400 +1207,240 @@ mod patch_tests {
         let merged = merge_patch(target, &patch);
         assert_eq!(print_unformatted(&merged).unwrap(), r#"{"a":"b"}"#);
     }
-}
 
-// ============================================================================
-// Phase 6c: JSON Patch generation (RFC 6902 diffing) and JSON Merge Patch
-// generation (RFC 7396 diffing). Mirrors `create_patches`/`compose_patch`/
-// `cJSONUtils_GeneratePatches` and `generate_merge_patch`/
-// `cJSONUtils_GenerateMergePatch` from cJSON_Utils.c.
-// ============================================================================
-
-// (Reuses `encode_pointer_segment`, already defined above for
-// `find_pointer_from_object_to`, to escape `~` and `/` in path segments -
-// the inverse of `decode_pointer_segment` used by the apply side.)
-
-/// Appends one patch operation object to `patches`. Mirrors `compose_patch`
-/// (cJSON_Utils.c:1096-1134). `suffix`, if present, is a single raw
-/// (unescaped) path segment appended and pointer-encoded onto `path` -
-/// mirrors C building `path + "/" + encode(suffix)`.
-fn compose_patch(patches: &mut Value, operation: &str, path: &str, suffix: Option<&str>, value: Option<&Value>) {
-    let mut patch = Value::object();
-    let _ = patch.object_push("op", Value::string(operation));
-
-    let full_path = match suffix {
-        None => path.to_string(),
-        Some(s) => format!("{path}/{}", encode_pointer_segment(s)),
-    };
-    let _ = patch.object_push("path", Value::string(full_path));
-
-    if let Some(v) = value {
-        let _ = patch.object_push("value", v.duplicate(true));
-    }
-
-    let _ = patches.array_push(patch);
-}
-
-/// Sorts object entries by key for the merge-join used by both patch and
-/// merge-patch generation. Mirrors `sort_object`'s comparator
-/// (cJSON_Utils.c, via `compare_strings`), but - unlike upstream, which
-/// sorts `from`/`to` **in place**, mutating the caller's documents as a
-/// side effect of diffing them - this builds a separate sorted index over
-/// borrowed references, leaving `from`/`to` untouched. A diff function
-/// that reorders its inputs' object keys as a side effect is surprising
-/// API behavior; not reproducing it is a deliberate improvement, flagged
-/// here rather than left implicit.
-fn sorted_object_index(pairs: &[(String, Value)], case_sensitive: bool) -> Vec<&(String, Value)> {
-    let mut sorted: Vec<&(String, Value)> = pairs.iter().collect();
-    sorted.sort_by(|a, b| compare_keys(&a.0, &b.0, case_sensitive));
-    sorted
-}
-
-fn compare_keys(a: &str, b: &str, case_sensitive: bool) -> std::cmp::Ordering {
-    if case_sensitive {
-        a.cmp(b)
-    } else {
-        a.to_lowercase().cmp(&b.to_lowercase())
-    }
-}
-
-/// Recursively diffs `from` against `to`, appending RFC 6902 operations to
-/// `patches` that would transform `from` into `to`. Mirrors `create_patches`
-/// (cJSON_Utils.c:1141-1279) function-for-function, with one consolidation:
-/// C hand-writes a separate comparison per scalar type (Number via
-/// `compare_double`, String via `strcmp`) and silently skips Null/Bool/Raw
-/// entirely (falls through an unhandled `default: break;` in the type
-/// switch) - only catching Bool changes indirectly, via its type-tag trick
-/// where True/False are literally different type tags. This port instead
-/// reuses the existing `compare()` helper (§5) uniformly for every scalar
-/// leaf type. Two observable, deliberate improvements fall out of that:
-/// (1) two `Raw` values with different content now correctly produce a
-/// `replace` patch, where upstream silently produces none; (2) the logic
-/// is expressed once instead of duplicated per type. Both are called out
-/// explicitly rather than left as incidental differences.
-fn create_patches(patches: &mut Value, path: &str, from: &Value, to: &Value, case_sensitive: bool) {
-    let same_kind = std::mem::discriminant(from) == std::mem::discriminant(to);
-    if !same_kind {
-        compose_patch(patches, "replace", path, None, Some(to));
-        return;
-    }
-
-    match (from, to) {
-        (Value::Array(from_items), Value::Array(to_items)) => {
-            let common_len = from_items.len().min(to_items.len());
-
-            // Diff elements present in both (cJSON_Utils.c:1177-1190).
-            for i in 0..common_len {
-                let new_path = format!("{path}/{i}");
-                create_patches(patches, &new_path, &from_items[i], &to_items[i], case_sensitive);
-            }
-
-            // Leftover "from" elements: remove, always at the same fixed
-            // index (mirrors cJSON_Utils.c:1192-1205 - `index` is not
-            // incremented in this loop, since removing element N repeatedly
-            // is correct as the array shrinks from that point).
-            for _ in common_len..from_items.len() {
-                compose_patch(patches, "remove", path, Some(&common_len.to_string()), None);
-            }
-
-            // Leftover "to" elements: append (cJSON_Utils.c:1206-1210).
-            for item in &to_items[common_len..] {
-                compose_patch(patches, "add", path, Some("-"), Some(item));
-            }
-        }
-        (Value::Object(from_pairs), Value::Object(to_pairs)) => {
-            // Merge-join over independently-sorted key indices (see
-            // `sorted_object_index`'s doc comment for why this doesn't
-            // mutate `from`/`to`, unlike upstream's in-place `sort_object`).
-            let from_sorted = sorted_object_index(from_pairs, case_sensitive);
-            let to_sorted = sorted_object_index(to_pairs, case_sensitive);
-
-            let mut fi = from_sorted.into_iter().peekable();
-            let mut ti = to_sorted.into_iter().peekable();
-
-            loop {
-                match (fi.peek(), ti.peek()) {
-                    (None, None) => break,
-                    (Some(_), None) => {
-                        let (k, _) = fi.next().unwrap();
-                        compose_patch(patches, "remove", path, Some(k), None);
-                    }
-                    (None, Some(_)) => {
-                        let (k, v) = ti.next().unwrap();
-                        compose_patch(patches, "add", path, Some(k), Some(v));
-                    }
-                    (Some((fk, _)), Some((tk, _))) => match compare_keys(fk, tk, case_sensitive) {
-                        std::cmp::Ordering::Equal => {
-                            let (k, fv) = fi.next().unwrap();
-                            let (_, tv) = ti.next().unwrap();
-                            let new_path = format!("{path}/{}", encode_pointer_segment(k));
-                            create_patches(patches, &new_path, fv, tv, case_sensitive);
-                        }
-                        std::cmp::Ordering::Less => {
-                            let (k, _) = fi.next().unwrap();
-                            compose_patch(patches, "remove", path, Some(k), None);
-                        }
-                        std::cmp::Ordering::Greater => {
-                            let (k, v) = ti.next().unwrap();
-                            compose_patch(patches, "add", path, Some(k), Some(v));
-                        }
-                    },
-                }
-            }
-        }
-        // Matching scalar kinds (Null/Bool/Number/String/Raw): see the
-        // consolidation note in this function's doc comment above.
-        _ => {
-            if !compare(from, to, case_sensitive) {
-                compose_patch(patches, "replace", path, None, Some(to));
-            }
-        }
-    }
-}
-
-/// Generates an RFC 6902 JSON Patch document (an array of operations) that,
-/// if applied to `from`, produces `to`. Case-insensitive object key
-/// matching. Mirrors `cJSONUtils_GeneratePatches`.
-pub fn generate_patch(from: &Value, to: &Value) -> Value {
-    generate_patch_inner(from, to, false)
-}
-
-/// Case-sensitive variant. Mirrors `cJSONUtils_GeneratePatchesCaseSensitive`.
-pub fn generate_patch_case_sensitive(from: &Value, to: &Value) -> Value {
-    generate_patch_inner(from, to, true)
-}
-
-fn generate_patch_inner(from: &Value, to: &Value, case_sensitive: bool) -> Value {
-    let mut patches = Value::array();
-    create_patches(&mut patches, "", from, to, case_sensitive);
-    patches
-}
-
-/// Recursive worker for merge-patch generation. Mirrors `generate_merge_patch`
-/// (cJSON_Utils.c:1391-1471). Returns `None` when `from` and `to` are
-/// already equal (mirrors C returning a real `NULL` pointer for "no patch
-/// needed" - the empty-object-after-diffing case), or `Some(patch_object)`
-/// otherwise.
-fn generate_merge_patch_inner(from: &Value, to: &Value, case_sensitive: bool) -> Option<Value> {
-    if !to.is_object() || !from.is_object() {
-        return Some(to.duplicate(true));
-    }
-
-    let from_pairs = from.as_object().unwrap();
-    let to_pairs = to.as_object().unwrap();
-    let from_sorted = sorted_object_index(from_pairs, case_sensitive);
-    let to_sorted = sorted_object_index(to_pairs, case_sensitive);
-
-    let mut patch = Value::object();
-    let mut fi = from_sorted.into_iter().peekable();
-    let mut ti = to_sorted.into_iter().peekable();
-
-    loop {
-        match (fi.peek(), ti.peek()) {
-            (None, None) => break,
-            (Some(_), None) => {
-                let (k, _) = fi.next().unwrap();
-                let _ = patch.object_push(k.clone(), Value::Null);
-            }
-            (None, Some(_)) => {
-                let (k, v) = ti.next().unwrap();
-                let _ = patch.object_push(k.clone(), v.duplicate(true));
-            }
-            (Some((fk, _)), Some((tk, _))) => match compare_keys(fk, tk, case_sensitive) {
-                std::cmp::Ordering::Less => {
-                    let (k, _) = fi.next().unwrap();
-                    let _ = patch.object_push(k.clone(), Value::Null);
-                }
-                std::cmp::Ordering::Greater => {
-                    let (k, v) = ti.next().unwrap();
-                    let _ = patch.object_push(k.clone(), v.duplicate(true));
-                }
-                std::cmp::Ordering::Equal => {
-                    let (_, fv) = fi.next().unwrap();
-                    let (k, tv) = ti.next().unwrap();
-                    if !compare(fv, tv, case_sensitive) {
-                        // Invariant: since compare() just reported fv != tv,
-                        // the recursive call below is guaranteed to find at
-                        // least one difference and cannot return None here -
-                        // mirrors C relying on the same invariant to skip a
-                        // NULL-check after its equivalent recursive call
-                        // (cJSON_Utils.c:1455). Handled with `if let`
-                        // instead of `.unwrap()` regardless, so a violated
-                        // invariant silently produces a smaller patch rather
-                        // than panicking.
-                        if let Some(sub) = generate_merge_patch_inner(fv, tv, case_sensitive) {
-                            let _ = patch.object_push(k.clone(), sub);
-                        }
-                    }
-                }
-            },
-        }
-    }
-
-    match patch.as_object() {
-        Some([]) => None,
-        _ => Some(patch),
-    }
-}
-
-/// Generates an RFC 7396 JSON Merge Patch describing how to turn `from`
-/// into `to`. Case-insensitive object key matching.
-///
-/// Returns `Option<Value>` rather than mirroring C's `cJSON*` return
-/// directly, because C's return value is genuinely three-way and two of
-/// those states collide in a way that's easy to mishandle: a real `NULL`
-/// pointer means "no patch needed" (`from` and `to` already match), while a
-/// `cJSON_CreateNull()` **value** (a non-NULL pointer to a node whose type
-/// happens to be "null") means "apply a patch that deletes everything" -
-/// the `to = None` case below. A caller who checks `result == NULL` without
-/// separately checking `cJSON_IsNull(result)` can conflate the two. This
-/// port's `Option<Value>` makes the distinction impossible to conflate:
-/// `None` = nothing to do, `Some(Value::Null)` = "replace with nothing",
-/// `Some(other)` = the actual patch object.
-///
-/// `to = None` mirrors passing a NULL `to` pointer in C, documented
-/// upstream as "patch to delete everything."
-pub fn generate_merge_patch(from: &Value, to: Option<&Value>) -> Option<Value> {
-    generate_merge_patch_dispatch(from, to, false)
-}
-
-/// Case-sensitive variant. Mirrors `cJSONUtils_GenerateMergePatchCaseSensitive`.
-pub fn generate_merge_patch_case_sensitive(from: &Value, to: Option<&Value>) -> Option<Value> {
-    generate_merge_patch_dispatch(from, to, true)
-}
-
-fn generate_merge_patch_dispatch(from: &Value, to: Option<&Value>, case_sensitive: bool) -> Option<Value> {
-    match to {
-        None => Some(Value::Null),
-        Some(to_val) => generate_merge_patch_inner(from, to_val, case_sensitive),
-    }
-}
-
-#[cfg(test)]
-mod generate_tests {
-    use super::*;
-    use crate::parse::parse;
-    use crate::print::print_unformatted;
-
-    fn doc(s: &str) -> Value {
-        parse(s).unwrap()
-    }
-
-    // --- generate_patch (RFC 6902) ---
+    // --- sort_object ---
 
     #[test]
-    fn generates_replace_for_changed_scalar() {
-        let from = doc(r#"{"foo": "bar"}"#);
-        let to = doc(r#"{"foo": "baz"}"#);
-        let patch = generate_patch(&from, &to);
-        assert_eq!(print_unformatted(&patch).unwrap(), r#"[{"op":"replace","path":"/foo","value":"baz"}]"#);
+    fn sort_object_sorts_keys_case_insensitively() {
+        let mut obj = doc(r#"{"c":3,"a":1,"B":2}"#);
+        sort_object(&mut obj);
+        assert_eq!(print_unformatted(&obj).unwrap(), r#"{"a":1,"B":2,"c":3}"#);
     }
 
     #[test]
-    fn generates_add_for_new_key() {
-        let from = doc(r#"{"foo": 1}"#);
-        let to = doc(r#"{"foo": 1, "bar": 2}"#);
-        let patch = generate_patch(&from, &to);
-        assert_eq!(print_unformatted(&patch).unwrap(), r#"[{"op":"add","path":"/bar","value":2}]"#);
+    fn sort_object_case_sensitive_uses_ascii_order() {
+        let mut obj = doc(r#"{"c":3,"a":1,"B":2}"#);
+        sort_object_case_sensitive(&mut obj);
+        // ASCII order: 'B'(66) < 'a'(97) < 'c'(99)
+        assert_eq!(print_unformatted(&obj).unwrap(), r#"{"B":2,"a":1,"c":3}"#);
     }
 
     #[test]
-    fn generates_remove_for_deleted_key() {
-        let from = doc(r#"{"foo": 1, "bar": 2}"#);
-        let to = doc(r#"{"foo": 1}"#);
-        let patch = generate_patch(&from, &to);
-        assert_eq!(print_unformatted(&patch).unwrap(), r#"[{"op":"remove","path":"/bar"}]"#);
+    fn sort_object_no_op_on_non_objects() {
+        let mut arr = doc(r#"[3,1,2]"#);
+        sort_object(&mut arr); // should not panic
+        assert_eq!(print_unformatted(&arr).unwrap(), "[3,1,2]");
     }
 
     #[test]
-    fn generates_no_patch_for_identical_documents() {
-        let from = doc(r#"{"foo": [1, 2, {"bar": true}]}"#);
-        let to = doc(r#"{"foo": [1, 2, {"bar": true}]}"#);
-        let patch = generate_patch(&from, &to);
-        assert_eq!(patch, Value::array());
+    fn sort_object_stable_preserves_duplicate_key_order() {
+        // Two entries with key "a" — stable sort preserves their relative order.
+        let mut obj = Value::Object(vec![
+            ("a".to_string(), Value::number(1.0)),
+            ("a".to_string(), Value::number(2.0)),
+        ]);
+        sort_object(&mut obj);
+        let pairs = obj.as_object().unwrap();
+        assert_eq!(pairs[0].1.as_f64(), Some(1.0));
+        assert_eq!(pairs[1].1.as_f64(), Some(2.0));
+    }
+
+    // --- generate_patches (RFC 6902 diff) ---
+
+    #[test]
+    fn generate_patches_identical_documents_produces_empty_patch() {
+        let a = doc(r#"{"a":1,"b":"hello"}"#);
+        let b = doc(r#"{"a":1,"b":"hello"}"#);
+        let patches = generate_patches(&a, &b);
+        assert_eq!(patches.as_array().unwrap().len(), 0);
     }
 
     #[test]
-    fn generates_patch_for_array_shrink_and_grow() {
-        let from = doc(r#"["a", "b", "c"]"#);
-        let to = doc(r#"["a", "x", "y", "z"]"#);
-        let patch = generate_patch(&from, &to);
-        // element 1 differs -> replace /1; element 2 differs -> replace /2;
-        // "to" is longer -> append the extra element.
+    fn generate_patches_replace_scalar() {
+        let a = doc(r#"{"a":1}"#);
+        let b = doc(r#"{"a":2}"#);
+        let patches = generate_patches(&a, &b);
         assert_eq!(
-            print_unformatted(&patch).unwrap(),
-            r#"[{"op":"replace","path":"/1","value":"x"},{"op":"replace","path":"/2","value":"y"},{"op":"add","path":"/-","value":"z"}]"#
+            print_unformatted(&patches).unwrap(),
+            r#"[{"op":"replace","path":"/a","value":2}]"#
         );
     }
 
     #[test]
-    fn round_trip_apply_generated_patch_reaches_target() {
-        let from = doc(r#"{"a": 1, "b": {"c": 2, "d": [1,2,3]}, "e": "keep"}"#);
-        let to = doc(r#"{"a": 10, "b": {"c": 2, "d": [1,2,3,4]}, "f": "new"}"#);
-
-        let patch = generate_patch(&from, &to);
-        let mut applied = from.clone();
-        apply_patches(&mut applied, &patch).expect("generated patch must apply cleanly");
-
-        assert!(compare(&applied, &to, false), "applying the generated patch did not reach the target");
+    fn generate_patches_add_key() {
+        let a = doc(r#"{"a":1}"#);
+        let b = doc(r#"{"a":1,"b":2}"#);
+        let patches = generate_patches(&a, &b);
+        assert_eq!(
+            print_unformatted(&patches).unwrap(),
+            r#"[{"op":"add","path":"/b","value":2}]"#
+        );
     }
 
     #[test]
-    fn raw_value_content_change_is_detected_replace() {
-        // Documented deliberate deviation: upstream's create_patches has no
-        // switch arm for cJSON_Raw, so it silently produces no patch even
-        // when Raw content differs. This port reuses compare() uniformly
-        // and correctly detects the change.
-        let from = Value::object();
-        let mut from = from;
-        from.object_push("r", Value::raw("[1,2]")).unwrap();
-        let mut to = Value::object();
-        to.object_push("r", Value::raw("[1,2,3]")).unwrap();
-
-        let patch = generate_patch(&from, &to);
-        assert_eq!(print_unformatted(&patch).unwrap(), r#"[{"op":"replace","path":"/r","value":[1,2,3]}]"#);
-    }
-
-    // --- generate_merge_patch (RFC 7396) ---
-
-    #[test]
-    fn generate_merge_patch_rfc7396_example() {
-        // RFC 7396 section 3's worked example.
-        let from = doc(r#"{"a":"b","c":{"d":"e","f":"g"}}"#);
-        let to = doc(r#"{"a":"z","c":{"f":"g"}}"#);
-        let patch = generate_merge_patch(&from, Some(&to)).unwrap();
-        assert_eq!(print_unformatted(&patch).unwrap(), r#"{"a":"z","c":{"d":null}}"#);
+    fn generate_patches_remove_key() {
+        let a = doc(r#"{"a":1,"b":2}"#);
+        let b = doc(r#"{"a":1}"#);
+        let patches = generate_patches(&a, &b);
+        assert_eq!(
+            print_unformatted(&patches).unwrap(),
+            r#"[{"op":"remove","path":"/b"}]"#
+        );
     }
 
     #[test]
-    fn generate_merge_patch_no_diff_returns_none() {
-        let from = doc(r#"{"a":1,"b":{"c":2}}"#);
-        let to = doc(r#"{"a":1,"b":{"c":2}}"#);
-        assert_eq!(generate_merge_patch(&from, Some(&to)), None);
+    fn generate_patches_array_add_and_remove() {
+        let a = doc(r#"["a","b","c"]"#);
+        let b = doc(r#"["a","b","c","d"]"#);
+        let patches = generate_patches(&a, &b);
+        assert_eq!(
+            print_unformatted(&patches).unwrap(),
+            r#"[{"op":"add","path":"/-","value":"d"}]"#
+        );
+
+        let a2 = doc(r#"["a","b","c"]"#);
+        let b2 = doc(r#"["a","b"]"#);
+        let patches2 = generate_patches(&a2, &b2);
+        assert_eq!(
+            print_unformatted(&patches2).unwrap(),
+            r#"[{"op":"remove","path":"/2"}]"#
+        );
     }
 
     #[test]
-    fn generate_merge_patch_to_none_means_delete_everything() {
-        let from = doc(r#"{"a":1}"#);
-        assert_eq!(generate_merge_patch(&from, None), Some(Value::Null));
+    fn generate_patches_array_element_changed() {
+        let a = doc(r#"[1,2,3]"#);
+        let b = doc(r#"[1,99,3]"#);
+        let patches = generate_patches(&a, &b);
+        assert_eq!(
+            print_unformatted(&patches).unwrap(),
+            r#"[{"op":"replace","path":"/1","value":99}]"#
+        );
     }
 
     #[test]
-    fn generate_merge_patch_non_object_replaces_wholesale() {
-        let from = doc(r#"{"a":1}"#);
-        let to = doc(r#"[1,2,3]"#);
-        let patch = generate_merge_patch(&from, Some(&to)).unwrap();
-        assert_eq!(patch, to);
+    fn generate_patches_type_change_produces_replace() {
+        let a = doc(r#"{"a":1}"#);
+        let b = doc(r#"{"a":"string"}"#);
+        let patches = generate_patches(&a, &b);
+        assert_eq!(
+            print_unformatted(&patches).unwrap(),
+            r#"[{"op":"replace","path":"/a","value":"string"}]"#
+        );
     }
 
     #[test]
-    fn round_trip_generate_then_apply_merge_patch() {
-        let from = doc(r#"{"title":"A","author":{"first":"J","last":"D"},"tags":["x"]}"#);
-        let to = doc(r#"{"title":"B","author":{"first":"J"},"extra":true}"#);
+    fn generate_patches_nested_objects() {
+        let a = doc(r#"{"x":{"a":1,"b":2}}"#);
+        let b = doc(r#"{"x":{"a":1,"b":3}}"#);
+        let patches = generate_patches(&a, &b);
+        assert_eq!(
+            print_unformatted(&patches).unwrap(),
+            r#"[{"op":"replace","path":"/x/b","value":3}]"#
+        );
+    }
 
-        let patch = generate_merge_patch(&from, Some(&to)).expect("documents differ, patch expected");
-        let merged = merge_patch(from.clone(), &patch);
+    #[test]
+    fn generate_patches_roundtrip_apply() {
+        // Generate patches, then apply them — result should equal `to`.
+        let from = doc(r#"{"a":1,"b":[1,2,3],"c":{"nested":true}}"#);
+        let to = doc(r#"{"a":2,"b":[1,2],"d":"new"}"#);
+        let patches = generate_patches(&from, &to);
 
-        assert!(compare(&merged, &to, false), "applying the generated merge patch did not reach the target");
+        let mut result = from.duplicate(true);
+        apply_patches(&mut result, &patches).unwrap();
+        assert!(compare(&result, &to, true));
+    }
+
+    #[test]
+    fn generate_patches_escapes_keys_with_tilde_and_slash() {
+        let a = doc(r#"{"a/b":1,"m~n":2}"#);
+        let b = doc(r#"{"a/b":10,"m~n":20}"#);
+        let patches = generate_patches(&a, &b);
+        let patches_str = print_unformatted(&patches).unwrap();
+        // Keys should be escaped: a/b → a~1b, m~n → m~0n
+        assert!(patches_str.contains("a~1b"));
+        assert!(patches_str.contains("m~0n"));
+    }
+
+    // --- add_patch_to_array ---
+
+    #[test]
+    fn add_patch_to_array_builds_correct_structure() {
+        let mut arr = Value::array();
+        add_patch_to_array(&mut arr, "add", "/foo", Some(&Value::number(42.0)));
+        assert_eq!(
+            print_unformatted(&arr).unwrap(),
+            r#"[{"op":"add","path":"/foo","value":42}]"#
+        );
+    }
+
+    #[test]
+    fn add_patch_to_array_without_value() {
+        let mut arr = Value::array();
+        add_patch_to_array(&mut arr, "remove", "/foo", None);
+        assert_eq!(
+            print_unformatted(&arr).unwrap(),
+            r#"[{"op":"remove","path":"/foo"}]"#
+        );
+    }
+
+    // --- generate_merge_patch (RFC 7396 diff) ---
+
+    #[test]
+    fn generate_merge_patch_identical_returns_none() {
+        let a = doc(r#"{"a":1,"b":"hello"}"#);
+        let b = doc(r#"{"a":1,"b":"hello"}"#);
+        assert_eq!(generate_merge_patch(&a, &b), None);
+    }
+
+    #[test]
+    fn generate_merge_patch_changed_value() {
+        let a = doc(r#"{"a":1,"b":2}"#);
+        let b = doc(r#"{"a":1,"b":3}"#);
+        let patch = generate_merge_patch(&a, &b).unwrap();
+        assert_eq!(print_unformatted(&patch).unwrap(), r#"{"b":3}"#);
+    }
+
+    #[test]
+    fn generate_merge_patch_added_key() {
+        let a = doc(r#"{"a":1}"#);
+        let b = doc(r#"{"a":1,"b":2}"#);
+        let patch = generate_merge_patch(&a, &b).unwrap();
+        assert_eq!(print_unformatted(&patch).unwrap(), r#"{"b":2}"#);
+    }
+
+    #[test]
+    fn generate_merge_patch_removed_key() {
+        let a = doc(r#"{"a":1,"b":2}"#);
+        let b = doc(r#"{"a":1}"#);
+        let patch = generate_merge_patch(&a, &b).unwrap();
+        assert_eq!(print_unformatted(&patch).unwrap(), r#"{"b":null}"#);
+    }
+
+    #[test]
+    fn generate_merge_patch_type_change_returns_whole_to() {
+        let a = doc(r#"{"a":1}"#);
+        let b = doc(r#"[1,2,3]"#);
+        let patch = generate_merge_patch(&a, &b).unwrap();
+        assert_eq!(print_unformatted(&patch).unwrap(), r#"[1,2,3]"#);
+    }
+
+    #[test]
+    fn generate_merge_patch_roundtrip() {
+        let from = doc(r#"{"title":"Goodbye!","author":{"givenName":"John","familyName":"Doe"},"tags":["example","sample"],"content":"unchanged"}"#);
+        let to = doc(r#"{"title":"Hello!","author":{"givenName":"John"},"tags":["example"],"content":"unchanged","phoneNumber":"+01-123"}"#);
+        let patch = generate_merge_patch(&from, &to).unwrap();
+        let result = merge_patch(from, &patch);
+        assert!(compare(&result, &to, true));
+    }
+
+    #[test]
+    fn generate_merge_patch_nested_object() {
+        let a = doc(r#"{"x":{"a":1,"b":2}}"#);
+        let b = doc(r#"{"x":{"a":1,"b":3}}"#);
+        let patch = generate_merge_patch(&a, &b).unwrap();
+        assert_eq!(print_unformatted(&patch).unwrap(), r#"{"x":{"b":3}}"#);
     }
 }
+

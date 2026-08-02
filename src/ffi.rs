@@ -31,7 +31,7 @@ use std::ptr;
 
 use crate::parse::parse as parse_json;
 use crate::print::{print, print_unformatted};
-use crate::utils::generate_patch_case_sensitive;
+use crate::utils::generate_patches_case_sensitive;
 use crate::value::Value;
 
 /// Parses a NUL-terminated UTF-8 JSON string. Returns an opaque handle owned
@@ -111,7 +111,7 @@ pub unsafe extern "C" fn cjson_rs_generate_patch(from: *const Value, to: *const 
     if from.is_null() || to.is_null() {
         return ptr::null_mut();
     }
-    let patch = generate_patch_case_sensitive(&*from, &*to);
+    let patch = generate_patches_case_sensitive(&*from, &*to);
     Box::into_raw(Box::new(patch))
 }
 
@@ -139,6 +139,66 @@ pub unsafe extern "C" fn cjson_rs_free_string(s: *mut c_char) {
     if !s.is_null() {
         drop(CString::from_raw(s));
     }
+}
+
+/// Sorts an object's keys alphabetically (case-insensitive). Mirrors
+/// `cJSONUtils_SortObject`. No-op if `handle` is NULL or not an object.
+///
+/// # Safety
+/// `handle` must be a live pointer previously returned by `cjson_rs_parse`
+/// and not yet passed to `cjson_rs_free`, or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn cjson_rs_sort_object(handle: *mut Value) {
+    if !handle.is_null() {
+        crate::utils::sort_object(&mut *handle);
+    }
+}
+
+/// Sorts an object's keys alphabetically (case-sensitive). Mirrors
+/// `cJSONUtils_SortObjectCaseSensitive`.
+///
+/// # Safety
+/// Same as `cjson_rs_sort_object`.
+#[no_mangle]
+pub unsafe extern "C" fn cjson_rs_sort_object_case_sensitive(handle: *mut Value) {
+    if !handle.is_null() {
+        crate::utils::sort_object_case_sensitive(&mut *handle);
+    }
+}
+
+/// Generates an RFC 6902 JSON Patch document (array of operations) that
+/// transforms `from` into `to`. Returns a new, caller-owned handle.
+/// Mirrors `cJSONUtils_GeneratePatches`.
+///
+/// # Safety
+/// Both `from` and `to` must be live pointers previously returned by
+/// `cjson_rs_parse` (or NULL, in which case NULL is returned).
+#[no_mangle]
+pub unsafe extern "C" fn cjson_rs_generate_patches(
+    from: *const Value,
+    to: *const Value,
+) -> *mut Value {
+    if from.is_null() || to.is_null() {
+        return ptr::null_mut();
+    }
+    let patches = crate::utils::generate_patches(&*from, &*to);
+    Box::into_raw(Box::new(patches))
+}
+
+/// Case-sensitive variant. Mirrors `cJSONUtils_GeneratePatchesCaseSensitive`.
+///
+/// # Safety
+/// Same as `cjson_rs_generate_patches`.
+#[no_mangle]
+pub unsafe extern "C" fn cjson_rs_generate_patches_case_sensitive(
+    from: *const Value,
+    to: *const Value,
+) -> *mut Value {
+    if from.is_null() || to.is_null() {
+        return ptr::null_mut();
+    }
+    let patches = crate::utils::generate_patches_case_sensitive(&*from, &*to);
+    Box::into_raw(Box::new(patches))
 }
 
 #[cfg(test)]

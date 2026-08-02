@@ -72,7 +72,7 @@ value is heap-allocated as a distinct `String` during parsing, whereas
 cJSON's C parser reuses one shared input buffer and only allocates when a
 value must outlive it. That's the direct cost of memory-safety-by-default
 over C's manual, more surgical allocation — an expected and acceptable
-trade for a hackathon judged 20% on code quality/idiomaticity, not
+trade for a hackathon judged 20% on code quality, not
 exclusively on raw speed.
 
 **Printing (small inputs)**: Rust is 30–53% slower on the three small,

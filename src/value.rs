@@ -439,6 +439,38 @@ fn compare_double(a: f64, b: f64) -> bool {
     (a - b).abs() <= max_val * f64::EPSILON
 }
 
+// ============================================================================
+// Display and FromStr: Rust trait implementations.
+// `Display` enables `format!("{}", value)` for compact output and
+// `format!("{:#}", value)` for pretty-printed output.
+// `FromStr` enables `let v: Value = json_str.parse()?`.
+// Neither of these has a C equivalent — they leverage Rust's trait system
+// to provide a more ergonomic API than cJSON's function-based interface.
+// ============================================================================
+
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Use the alternate flag (`{:#}`) for pretty-printed output.
+        let result = if f.alternate() {
+            crate::print::print(self)
+        } else {
+            crate::print::print_unformatted(self)
+        };
+        match result {
+            Ok(s) => f.write_str(&s),
+            Err(_) => Err(std::fmt::Error),
+        }
+    }
+}
+
+impl std::str::FromStr for Value {
+    type Err = crate::error::CJsonError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        crate::parse::parse(s)
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::approx_constant)]
 mod tests {
@@ -658,5 +690,59 @@ mod tests {
         // Fails (returns false) when `self` isn't an Object.
         let mut not_obj = Value::null();
         assert!(!not_obj.add_bool_to_object("x", true));
+    }
+
+    // --- Display and FromStr ---
+
+    #[test]
+    fn display_compact_output() {
+        let v = Value::Object(vec![
+            ("a".to_string(), Value::number(1.0)),
+            ("b".to_string(), Value::Array(vec![Value::Bool(true), Value::Null])),
+        ]);
+        assert_eq!(format!("{}", v), r#"{"a":1,"b":[true,null]}"#);
+    }
+
+    #[test]
+    fn display_pretty_output_with_alternate() {
+        let v = Value::Object(vec![
+            ("a".to_string(), Value::number(1.0)),
+        ]);
+        let pretty = format!("{:#}", v);
+        assert!(pretty.contains('\n'));
+        assert!(pretty.contains('\t'));
+        assert!(pretty.contains("\"a\""));
+    }
+
+    #[test]
+    fn from_str_parses_valid_json() {
+        let v: Value = r#"{"key": [1, 2, 3]}"#.parse().unwrap();
+        assert!(v.is_object());
+        assert_eq!(v.object_get("key").unwrap().array_len(), Some(3));
+    }
+
+    #[test]
+    fn from_str_rejects_invalid_json() {
+        let result: Result<Value, _> = "{invalid".parse();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn display_roundtrips_through_from_str() {
+        let original = Value::Array(vec![
+            Value::number(1.0),
+            Value::string("hello"),
+            Value::Bool(false),
+            Value::Null,
+        ]);
+        let serialized = format!("{}", original);
+        let parsed: Value = serialized.parse().unwrap();
+        assert_eq!(original, parsed);
+    }
+
+    #[test]
+    fn error_display_is_human_readable() {
+        let err = crate::error::CJsonError::UnexpectedToken { pos: 42 };
+        assert_eq!(format!("{}", err), "unexpected token at position 42");
     }
 }

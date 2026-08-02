@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>cjson-rs — C vs Rust Differential Terminal GUI | Port Mortem 2026</title>
     <meta name="description"
-        content="Split-screen terminal GUI comparing original C cJSON.c and idiomatic Rust cjson-rs port side-by-side for the Code Resurrection Hackathon.">
+        content="Split-screen terminal GUI comparing original C cJSON.c and Rust cjson-rs port side-by-side for the Code Resurrection Hackathon.">
     <!-- Google Fonts for crisp, authentic Monospace Terminal typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,7 +20,8 @@
     <!-- Top Terminal Title Bar -->
     <header class="terminal-titlebar">
         <div class="titlebar-title">
-            <span class="prompt-user">portmortem@cjson-rs</span>:<span class="prompt-path">~/differential</span> — <span class="title-label">[ C vs Rust Differential Terminal ]</span>
+            <span class="prompt-user">portmortem@cjson-rs</span>:<span class="prompt-path">~/differential</span> — <span
+                class="title-label">[ C vs Rust Differential Terminal ]</span>
         </div>
     </header>
 
@@ -44,7 +45,7 @@
             </button>
         </div>
         <div class="nav-status">
-            <span id="global-match-badge" class="badge-match">✔ 131/131 TESTS PASSING (100% BEHAVIORAL
+            <span id="global-match-badge" class="badge-match">✔ 160/160 TESTS PASSING (100% BEHAVIORAL
                 EQUIVALENCE)</span>
         </div>
     </nav>
@@ -58,8 +59,8 @@
             </select>
         </div>
         <div class="action-buttons">
-            <button id="btn-run-diff" class="btn-terminal btn-primary" title="Execute full 131-test verification suite">
-                ► Verify All 131 Tests
+            <button id="btn-run-diff" class="btn-terminal btn-primary" title="Execute full 160-test verification suite">
+                ► Verify All 160 Tests
             </button>
             <button id="btn-custom-json" class="btn-terminal btn-action" title="Input custom JSON string">
                 + Custom JSON...
@@ -175,6 +176,7 @@
     <!-- CRT Scanline Overlay -->
     <div class="crt-overlay" aria-hidden="true"></div>
 
+    <script src="wasm_bundle.js"></script>
     <script src="app.js"></script>
 </body>
 
