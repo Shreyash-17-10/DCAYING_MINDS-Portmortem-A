@@ -40,7 +40,7 @@ Produces `target/release/libcjson_rs.a` (static), `libcjson_rs.so`
 cargo test
 ```
 
-Runs 126 unit tests (co-located with each module) plus four integration
+Runs 144 unit tests (co-located with each module) plus four integration
 test files: `tests/parse_examples.rs` (15 tests, using the original cJSON
 `tests/inputs/test1..test11` fixtures copied verbatim, parse → print →
 byte-exact match against upstream's own `.expected` outputs),
@@ -58,7 +58,7 @@ for two genuine edge cases this surfaced, both independently verified
 against the real `cJSON.c` to be shared upstream characteristics, not
 divergences).
 
-**150 tests total, all passing.**
+**168 tests total, all passing.**
 
 Linting: `cargo clippy --all-targets -- -D warnings` passes clean (denies,
 not just warns) across the library, all integration tests, and benchmarks.
