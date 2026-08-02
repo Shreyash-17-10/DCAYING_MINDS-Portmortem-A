@@ -283,6 +283,13 @@ mod tests {
     }
 
     #[test]
+    // This 17-significant-digit literal is deliberate: it's the value
+    // used to exercise print_number's 17-digit fallback path (the case
+    // where 15 digits doesn't round-trip exactly, see cJSON.c:622-630 and
+    // this port's own doc comment on print_number). Truncating it, as
+    // clippy's excessive_precision lint suggests, would test a different
+    // code path than the one this test is named for.
+    #[allow(clippy::approx_constant, clippy::excessive_precision)]
     fn number_positive_reals() {
         assert_eq!(print_number(0.123), "0.123");
         assert_eq!(print_number(10e-10), "1e-09");

@@ -3,3 +3,4 @@
 differential/diff_test
 ffi_include/smoke_test
 benches/c_bench/c_bench
+.DS_Store

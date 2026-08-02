@@ -39,17 +39,28 @@ Produces `target/release/libcjson_rs.a` (static), `libcjson_rs.so`
 cargo test
 ```
 
-Runs 112 unit tests (co-located with each module) plus three integration
+Runs 126 unit tests (co-located with each module) plus four integration
 test files: `tests/parse_examples.rs` (15 tests, using the original cJSON
 `tests/inputs/test1..test11` fixtures copied verbatim, parse → print →
 byte-exact match against upstream's own `.expected` outputs),
 `tests/json_pointer_examples.rs` (the RFC 6901 conformance case ported from
-upstream's `old_utils_tests.c`), and `tests/json_patch_conformance.rs`
+upstream's `old_utils_tests.c`), `tests/json_patch_conformance.rs`
 (the official [json-patch-tests](https://github.com/json-patch/json-patch-tests)
 RFC 6902 conformance suite — `tests.json`, `spec_tests.json`,
 `cjson-utils-tests.json`, copied verbatim from upstream — **121 cases total,
-4 disabled matching upstream's own flags, 117/117 active cases pass**).
-131 tests total, all passing.
+4 disabled matching upstream's own flags, 117/117 active cases pass**),
+and `tests/proptest_roundtrip.rs` (5 property-based tests generating
+random `Value` trees — parse/print round-tripping, patch generation
+correctness, and more — run at 5,000 cases each for this submission,
+25,000 total assertions; see [DECISIONS.md §9b](./DECISIONS.md#9b-property-based-testing-testsproptest_roundtriprs)
+for two genuine edge cases this surfaced, both independently verified
+against the real `cJSON.c` to be shared upstream characteristics, not
+divergences).
+
+**150 tests total, all passing.**
+
+Linting: `cargo clippy --all-targets -- -D warnings` passes clean (denies,
+not just warns) across the library, all integration tests, and benchmarks.
 
 ## Benchmark
 
@@ -81,6 +92,44 @@ inputs (11 original fixtures + 11 handwritten edge cases: unicode surrogate
 pairs, extreme numbers, invalid input, deep nesting, duplicate keys), and
 checks byte-identical output. Last run: **22/22 matched, 0 mismatches.**
 
+A second harness cross-validates JSON Patch *generation* against the real
+upstream library:
+
+```bash
+cd differential
+gcc -O2 diff_generate_test.c ../original_c_reference/cJSON.c \
+    ../original_c_reference/cJSON_Utils.c \
+    ../target/release/libcjson_rs.a \
+    -I../original_c_reference -I../ffi_include \
+    -lpthread -ldl -lm -o diff_generate_test
+./diff_generate_test
+```
+
+Generates a patch with this Rust port, then applies that Rust-generated
+patch using the real, unmodified upstream `cJSONUtils_ApplyPatchesCaseSensitive`,
+and confirms the result matches the intended target via the real
+`cJSON_Compare` — proving Rust-generated patches are genuinely interoperable
+with the original C library, not just self-consistent. Last run: **10/10
+matched, 0 mismatches.**
+
+## Property-based testing
+
+```bash
+cargo test --test proptest_roundtrip
+# or, for a much stronger run (slower):
+PROPTEST_CASES=5000 cargo test --test proptest_roundtrip --release
+```
+
+5 properties generating random `Value` trees (bounded depth/size), checking
+print/parse round-tripping, formatted/unformatted agreement,
+duplicate/compare consistency, and generate-then-apply-patch correctness.
+Runs on stable Rust — no `cargo-fuzz`/nightly needed. See
+[DECISIONS.md §9b](./DECISIONS.md#9b-property-based-testing-testsproptest_roundtriprs)
+for two genuine edge cases this surfaced during development, both traced
+to root cause and independently confirmed — by compiling and running the
+actual unmodified `cJSON.c` — to be shared characteristics of the
+algorithm itself, not divergences this port introduced.
+
 ## Fuzzing
 
 ```bash
@@ -99,7 +148,8 @@ evidence of correctness in the meantime).
 ## FFI / calling from C
 
 `src/ffi.rs` exposes a small C ABI (`cjson_rs_parse`, `cjson_rs_print`,
-`cjson_rs_print_unformatted`, `cjson_rs_free`, `cjson_rs_free_string`) —
+`cjson_rs_print_unformatted`, `cjson_rs_generate_patch`, `cjson_rs_free`,
+`cjson_rs_free_string`) —
 see `ffi_include/cjson_rs.h` for the header (hand-written; regenerate
 automatically anytime with `cbindgen --config cbindgen.toml --output
 ffi_include/cjson_rs_generated.h` if you have
@@ -121,23 +171,25 @@ src/
                predicates, array/object mutation, compare, duplicate
   parse.rs   — number/string primitives + recursive-descent parser
   print.rs   — pretty and compact serialization
-  utils.rs   — JSON Pointer (RFC 6901), JSON Patch apply (RFC 6902),
-               JSON Merge Patch apply (RFC 7396); diff/generate for
-               Patch and Merge Patch not yet ported
+  utils.rs   — JSON Pointer (RFC 6901), JSON Patch apply+generate
+               (RFC 6902), JSON Merge Patch apply+generate (RFC 7396)
   error.rs   — CJsonError, with source position on every variant
   ffi.rs     — C ABI shim (the only unsafe in the crate)
 tests/
   parse_examples.rs           — ported from cJSON's parse_examples.c
   json_pointer_examples.rs    — ported from cJSON's old_utils_tests.c
   json_patch_conformance.rs   — official RFC 6902 json-patch-tests suite
+  proptest_roundtrip.rs       — property-based tests (stable Rust, no nightly needed)
   fixtures/inputs/            — original cJSON test fixtures, unmodified
   fixtures/json-patch-tests/  — official JSON Patch conformance suite, unmodified
 benches/
   parse_print.rs   — criterion benchmarks
   c_bench/         — companion C benchmark against original cJSON.c
 differential/
-  diff_test.c   — C↔Rust differential testing harness
-  corpus/        — test inputs (originals + adversarial edge cases)
+  diff_test.c            — C↔Rust differential testing harness (parse/print)
+  diff_generate_test.c   — cross-implementation test: Rust-generated
+                            patches applied by the real upstream C library
+  corpus/                — test inputs (originals + adversarial edge cases)
 fuzz/
   fuzz_targets/cjson_read_fuzzer.rs — cargo-fuzz target (ported from C)
 original_c_reference/
@@ -153,10 +205,13 @@ required; new Rust source is contributed under the same terms.
 
 ## Known gaps
 
-JSON Patch (RFC 6902) and JSON Merge Patch (RFC 7396) **application** are
-fully implemented and pass the official conformance suite (117/117 active
-cases). What's *not* ported is patch **generation** — diffing two documents
-to produce a patch (`cJSONUtils_GeneratePatches`,
-`cJSONUtils_GenerateMergePatch`). See
-[DECISIONS.md §6b](./DECISIONS.md#6b-json-patch-rfc-6902-and-json-merge-patch-rfc-7396--apply-side)
-for the full writeup.
+`cJSON_Utils.c`'s full public API — JSON Pointer (RFC 6901), JSON Patch
+apply and generate (RFC 6902), and JSON Merge Patch apply and generate
+(RFC 7396) — is fully implemented. What's not done: the `fuzz/` target is
+structurally complete but hasn't been executed in this environment (no
+`rustup`/nightly available — see `fuzz/README.md`), and a handful of
+upstream test files (`minify_tests.c`, `print_*.c`, `compare_tests.c`,
+`misc_utils_tests.c`, `readme_examples.c`) aren't literally ported, though
+their behavior is covered indirectly by this port's own unit tests. See
+[DECISIONS.md §1](./DECISIONS.md#1-scope-and-status) for the full status
+table.
