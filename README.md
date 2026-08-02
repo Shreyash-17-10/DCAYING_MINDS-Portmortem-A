@@ -6,6 +6,7 @@ contributors (MIT licensed). Built for **Port Mortem 2026**, part of the
 [Code Resurrection Hackathon](https://coderesurrection.com/2026) — C → Rust
 migration track.
 
+
 This is a genuine port, not a wrapper: there is no `unsafe extern "C"` call
 into the original `cJSON.c` anywhere in the library itself. The original C
 source is kept in `original_c_reference/` purely for license attribution
@@ -61,6 +62,29 @@ divergences).
 
 Linting: `cargo clippy --all-targets -- -D warnings` passes clean (denies,
 not just warns) across the library, all integration tests, and benchmarks.
+
+## GUI
+
+A small split-screen terminal-style web GUI for visually comparing the
+original C output against this Rust port side by side.
+
+```bash
+./run_gui.sh
+```
+
+This starts a zero-dependency Python HTTP server (`gui/server.py`) on
+`http://localhost:8080` and opens it in your browser. The left panel
+represents the original `cJSON.c`, the right panel this port
+(`cjson-rs`); `/api/run_diff` triggers the compiled `differential/diff_test`
+binary against `differential/corpus/` and streams its real output into the
+page.
+
+**Note:** if `differential/diff_test` hasn't been built yet (see
+[Differential testing](#differential-testing) above), the GUI falls back to
+a "Client-Side Interactive Simulation" placeholder message rather than
+failing outright — this is a static demo string, not a live result. Build
+`diff_test` first if you want the GUI showing real, freshly-executed output.
+
 
 ## Benchmark
 
