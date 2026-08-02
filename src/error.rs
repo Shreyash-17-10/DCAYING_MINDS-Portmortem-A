@@ -1,6 +1,8 @@
 //! Error types for cjson-rs.
 //! Contains the CJsonError enum used for parsing errors.
 
+use std::fmt;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CJsonError {
     /// Input did not start with `"` where a string was expected.
@@ -46,3 +48,73 @@ pub enum CJsonError {
     /// require_null_terminated=false) ignores trailing content instead.
     TrailingCharacters { pos: usize },
 }
+
+impl CJsonError {
+    /// Returns the byte position where the error was detected.
+    pub fn position(&self) -> usize {
+        match self {
+            CJsonError::InvalidString { pos }
+            | CJsonError::UnterminatedString { pos }
+            | CJsonError::InvalidEscape { pos }
+            | CJsonError::InvalidUnicodeEscape { pos }
+            | CJsonError::InvalidUtf8 { pos }
+            | CJsonError::InvalidNumber { pos }
+            | CJsonError::UnexpectedEnd { pos }
+            | CJsonError::UnexpectedToken { pos }
+            | CJsonError::NestingTooDeep { pos }
+            | CJsonError::ExpectedObjectKey { pos }
+            | CJsonError::ExpectedColon { pos }
+            | CJsonError::ExpectedCommaOrClose { pos }
+            | CJsonError::TrailingCharacters { pos } => *pos,
+        }
+    }
+}
+
+impl fmt::Display for CJsonError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CJsonError::InvalidString { pos } => {
+                write!(f, "invalid string at position {pos}")
+            }
+            CJsonError::UnterminatedString { pos } => {
+                write!(f, "unterminated string at position {pos}")
+            }
+            CJsonError::InvalidEscape { pos } => {
+                write!(f, "invalid escape sequence at position {pos}")
+            }
+            CJsonError::InvalidUnicodeEscape { pos } => {
+                write!(f, "invalid unicode escape at position {pos}")
+            }
+            CJsonError::InvalidUtf8 { pos } => {
+                write!(f, "invalid UTF-8 at position {pos}")
+            }
+            CJsonError::InvalidNumber { pos } => {
+                write!(f, "invalid number at position {pos}")
+            }
+            CJsonError::UnexpectedEnd { pos } => {
+                write!(f, "unexpected end of input at position {pos}")
+            }
+            CJsonError::UnexpectedToken { pos } => {
+                write!(f, "unexpected token at position {pos}")
+            }
+            CJsonError::NestingTooDeep { pos } => {
+                write!(f, "nesting too deep at position {pos}")
+            }
+            CJsonError::ExpectedObjectKey { pos } => {
+                write!(f, "expected object key at position {pos}")
+            }
+            CJsonError::ExpectedColon { pos } => {
+                write!(f, "expected ':' at position {pos}")
+            }
+            CJsonError::ExpectedCommaOrClose { pos } => {
+                write!(f, "expected ',' or closing bracket at position {pos}")
+            }
+            CJsonError::TrailingCharacters { pos } => {
+                write!(f, "trailing characters at position {pos}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for CJsonError {}
+

@@ -16,4 +16,10 @@ char *cjson_rs_print_unformatted(const CJsonRsValue *handle);
 void cjson_rs_free(CJsonRsValue *handle);
 void cjson_rs_free_string(char *s);
 
+/* Phase 7: sort and patch generation */
+void cjson_rs_sort_object(CJsonRsValue *handle);
+void cjson_rs_sort_object_case_sensitive(CJsonRsValue *handle);
+CJsonRsValue *cjson_rs_generate_patches(const CJsonRsValue *from, const CJsonRsValue *to);
+CJsonRsValue *cjson_rs_generate_patches_case_sensitive(const CJsonRsValue *from, const CJsonRsValue *to);
+
 #endif

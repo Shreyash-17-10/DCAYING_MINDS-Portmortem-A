@@ -11,3 +11,4 @@ pub mod parse;
 pub mod print;
 pub mod utils;
 pub mod value;
+pub mod wasm;

@@ -594,7 +594,9 @@ mod value_parser_tests {
     fn parses_scalar_string_and_number() {
         assert_eq!(parse("\"hi\"").unwrap(), Value::String("hi".to_string()));
         assert_eq!(parse("42").unwrap(), Value::Number(42.0));
-        assert_eq!(parse("-3.14").unwrap(), Value::Number(-3.14));
+
+        let expected = "-3.14".parse::<f64>().unwrap();
+        assert_eq!(parse("-3.14").unwrap(), Value::Number(expected));
     }
 
     #[test]
