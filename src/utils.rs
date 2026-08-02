@@ -1,10 +1,8 @@
 //! JSON Pointer / JSON Patch / JSON Merge Patch (RFC 6901 / RFC 6902 / RFC 7396).
 //! Source: cJSON_Utils.c / cJSON_Utils.h.
 //!
-//! Phase 6a (this session): JSON Pointer only - `get_pointer`,
-//! `get_pointer_case_sensitive`, `find_pointer_from_object_to`. JSON Patch
-//! and JSON Merge Patch are separate Phase 6 sessions (largest chunk of the
-//! codebase - split by feature per the roadmap, not ported in one sitting).
+//! This module contains JSON Pointer (RFC 6901), JSON Patch (RFC 6902) apply,
+//! and JSON Merge Patch (RFC 7396) apply.
 //!
 //! Design notes (see DECISIONS.md):
 //! - `cJSONUtils_FindPointerFromObjectTo` relies on C pointer identity
@@ -15,8 +13,7 @@
 //!   `Value` will correctly find nothing, matching upstream's pointer
 //!   semantics rather than a value-equality search.
 //! - No `unsafe`; pointer segments are decoded during comparison (mirroring
-//!   `compare_pointers`) rather than via in-place byte mutation
-//!   (`decode_pointer_inplace`, which Phase 6b's Patch code will need).
+//!   `compare_pointers`) rather than via in-place byte mutation.
 
 use crate::value::Value;
 
@@ -669,16 +666,18 @@ fn merge_patch_inner(target: Value, patch: &Value, case_sensitive: bool) -> Valu
         Value::object()
     };
 
-    for (key, patch_child) in patch_pairs.iter().cloned() {
+for (key, patch_child) in patch_pairs.iter().cloned() {
         if patch_child.is_null() {
             // RFC 7396: null in the patch means "delete this key".
-            target.object_delete(&key, case_sensitive);
+            target.object_delete(key, case_sensitive);
         } else {
             let existing = target
-                .object_detach(&key, case_sensitive)
-                .unwrap_or(Value::Null);
-            let merged = merge_patch_inner(existing, &patch_child, case_sensitive);
-            let _ = target.object_push(key, merged);
+let existing = target
+    .object_detach(&key, case_sensitive)
+    .unwrap_or(Value::Null);
+
+let merged = merge_patch_inner(existing, &patch_child, case_sensitive);
+let _ = target.object_push(key, merged);
         }
     }
 

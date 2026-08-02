@@ -107,7 +107,7 @@ fn print_object(
     let depth = depth + 1;
     for (i, (key, val)) in pairs.iter().enumerate() {
         if format {
-            out.extend(std::iter::repeat_n('\t', depth));
+out.extend(std::iter::repeat_n('\t', depth));
         }
         print_string_ptr(key, out);
         out.push(':');
@@ -123,7 +123,7 @@ fn print_object(
         }
     }
     if format {
-        out.extend(std::iter::repeat_n('\t', depth - 1));
+out.extend(std::iter::repeat_n('\t', depth - 1));
     }
     out.push('}');
     Ok(())
@@ -255,7 +255,7 @@ fn format_g(d: f64, sig_digits: usize) -> String {
     }
 }
 #[cfg(test)]
-#[allow(clippy::approx_constant)]
+#[allow(clippy::approx_constant, clippy::excessive_precision)]
 mod tests {
 
     use super::*;

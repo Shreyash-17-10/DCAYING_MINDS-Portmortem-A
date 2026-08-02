@@ -39,7 +39,7 @@ Produces `target/release/libcjson_rs.a` (static), `libcjson_rs.so`
 cargo test
 ```
 
-Runs 112 unit tests (co-located with each module) plus four integration
+Runs 112 unit tests (co-located with each module) plus three integration
 test files: `tests/parse_examples.rs` (15 tests, using the original cJSON
 `tests/inputs/test1..test11` fixtures copied verbatim, parse → print →
 byte-exact match against upstream's own `.expected` outputs),

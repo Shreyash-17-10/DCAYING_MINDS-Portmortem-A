@@ -1,7 +1,5 @@
 //! JSON parsing primitives: numbers and strings.
-//! Phase 2 fills in number/string scanning; Phase 3 will add array/object/value
-//! parsing on top of these (parse_array, parse_object, parse_value, cJSON_Parse
-//! in the original cJSON.c).
+//! This module contains number, string, array, object, and value parsing.
 //!
 //! Source mapping:
 //! - `parse_number` (cJSON.c:307)      -> `parse_number` below
@@ -581,6 +579,7 @@ pub fn parse_strict(input: &str) -> Result<Value, CJsonError> {
 }
 
 #[cfg(test)]
+#[allow(clippy::approx_constant)]
 mod value_parser_tests {
     use super::*;
 

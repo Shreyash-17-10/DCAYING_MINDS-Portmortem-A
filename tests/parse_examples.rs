@@ -38,10 +38,14 @@ fn do_test(test_name: &str) {
     let actual = cjson_rs::print::print(&tree)
         .unwrap_or_else(|e| panic!("failed to print {test_name}: {e:?}"));
 
-    let expected = expected.replace("\r\n", "\n");
-    let actual = actual.replace("\r\n", "\n");
+let actual_norm = actual.replace("\r\n", "\n");
+let expected_norm = expected.replace("\r\n", "\n");
 
-    assert_eq!(expected, actual, "mismatch for {test_name}");
+assert_eq!(
+    expected_norm,
+    actual_norm,
+    "mismatch for {test_name}"
+);
 }
 
 #[test]
