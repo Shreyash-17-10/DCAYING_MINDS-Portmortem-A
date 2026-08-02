@@ -490,11 +490,12 @@ algorithm itself — not divergences this port introduced.
 
 ## 10. Test suite (`tests/`)
 
-- **150 tests total** at last count: 126 unit tests co-located with the
+- **168 tests total** at last count: 144 unit tests co-located with the
   modules they test (`src/*.rs`, `#[cfg(test)]` — including
-  `utils::patch_tests` and `utils::generate_tests` for §6b/§6c, and
-  `ffi::generate_ffi_tests` for the `cjson_rs_generate_patch` export),
-  3 in `tests/json_patch_conformance.rs`, 15 in `tests/parse_examples.rs`,
+  `utils::patch_tests` and `utils::generate_tests` for §6b/§6c,
+  `ffi::tests` for the `cjson_rs_generate_patch` export, and
+  `wasm::tests` for the WASM bindings), 3 in
+  `tests/json_patch_conformance.rs`, 15 in `tests/parse_examples.rs`,
   5 in `tests/proptest_roundtrip.rs` (§9b — each run at thousands of cases,
   not counted as 1 each toward this total the way `cargo test`'s default
   reporting shows them), and 1 (13 assertions) in
