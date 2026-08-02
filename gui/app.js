@@ -383,13 +383,13 @@
 
     async function init() {
         await initLiveWasmEngine();
-        registerAll160Tests();
+        registerAll168Tests();
         populateSelector();
         bindEvents();
         selectFixture('test1');
     }
 
-    function registerAll160Tests() {
+    function registerAll168Tests() {
         const baseKeys = [
             'test1', 'test2', 'test3', 'test4', 'test5', 'test6', 'test7', 'test8', 'test9', 'test10', 'test11',
             'edge_bare_null', 'edge_bare_string', 'edge_duplicate_keys', 'edge_empty_array', 'edge_empty_object',
