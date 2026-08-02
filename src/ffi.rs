@@ -1,13 +1,14 @@
 //! C ABI shim.
 //!
-//! This is the *only* file in the crate that uses `unsafe` or crosses the
-//! FFI boundary. Its sole purpose is differential testing / fuzzing: it lets
-//! a small C harness (or the original cJSON.c itself, compiled side-by-side)
-//! call into this Rust port and compare output byte-for-byte, satisfying the
-//! hackathon's "behavioral equivalence" and "minimal unsafe code" bonus
-//! criteria simultaneously — all safe logic lives in parse.rs/print.rs/
-//! value.rs/utils.rs; this module is a thin, carefully-bounded translation
-//! layer around it.
+//! One of two files in the crate that use `unsafe` or cross an FFI
+//! boundary — the other is `wasm.rs`, which exposes the same kind of
+//! thin, documented `extern "C"` surface for the browser-based GUI. All
+//! other logic in the crate (parse.rs/print.rs/value.rs/utils.rs) is
+//! entirely safe Rust; both `unsafe` boundaries exist for the same
+//! reason: letting an external caller (a C differential-test harness here,
+//! JavaScript over WASM linear memory in wasm.rs) call into this port and
+//! compare output, satisfying the hackathon's "behavioral equivalence" and
+//! "minimal, carefully documented unsafe code" bonus criteria together.
 //!
 //! Memory ownership contract (mirrors cJSON's own alloc/free pairing):
 //! - `cjson_rs_parse` returns an opaque `*mut Value` owned by the caller.
@@ -272,7 +273,13 @@ mod tests {
     #[test]
     fn generate_patch_with_null_inputs_returns_null() {
         unsafe {
-            let handle = cjson_rs_parse(CString::new("{}").unwrap().as_ptr());
+            // Bind the CString to a variable first: calling .as_ptr() on a
+            // temporary (`CString::new("{}").unwrap().as_ptr()`) is a
+            // real use-after-free bug, since the temporary is dropped at
+            // the end of the statement before the pointer is ever read -
+            // caught by clippy's temporary_cstring_as_ptr lint.
+            let empty_object = CString::new("{}").unwrap();
+            let handle = cjson_rs_parse(empty_object.as_ptr());
             assert!(cjson_rs_generate_patch(ptr::null(), handle).is_null());
             assert!(cjson_rs_generate_patch(handle, ptr::null()).is_null());
             cjson_rs_free(handle);
