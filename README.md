@@ -58,7 +58,7 @@ for two genuine edge cases this surfaced, both independently verified
 against the real `cJSON.c` to be shared upstream characteristics, not
 divergences).
 
-**168 tests total, all passing.**
+**169 tests total, all passing.**
 
 Linting: `cargo clippy --all-targets -- -D warnings` passes clean (denies,
 not just warns) across the library, all integration tests, and benchmarks.
