@@ -2,6 +2,7 @@
 name = "cjson-rs"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.75"
 authors = ["Port Mortem 2026"]
 description = "Rust port of cJSON (MIT-licensed C JSON library by Dave Gamble)"
 license = "MIT"
