@@ -24,6 +24,13 @@ pub extern "C" fn wasm_alloc(size: usize) -> *mut u8 {
 }
 
 /// Helper to deallocate linear memory in WASM.
+///
+/// # Safety
+/// `ptr` must be either null or a pointer previously returned by
+/// `wasm_alloc` with this exact `size`, and must not have already been
+/// passed to `wasm_dealloc`. Passing a pointer from anywhere else, a
+/// mismatched `size`, or a pointer that's already been deallocated is
+/// undefined behavior.
 #[no_mangle]
 pub unsafe extern "C" fn wasm_dealloc(ptr: *mut u8, size: usize) {
     if !ptr.is_null() && size > 0 {
@@ -32,6 +39,13 @@ pub unsafe extern "C" fn wasm_dealloc(ptr: *mut u8, size: usize) {
 }
 
 /// Helper to free strings returned by WASM functions.
+///
+/// # Safety
+/// `ptr` must be either null or a pointer previously returned by one of
+/// this module's string-returning functions (`wasm_print_unformatted`,
+/// `wasm_print_formatted`, `wasm_get_parse_error`, `wasm_inspect_ast`,
+/// `wasm_get_version`), and must not have already been freed. Double-free
+/// or freeing a pointer from anywhere else is undefined behavior.
 #[no_mangle]
 pub unsafe extern "C" fn wasm_free_string(ptr: *mut c_char) {
     if !ptr.is_null() {
@@ -40,6 +54,11 @@ pub unsafe extern "C" fn wasm_free_string(ptr: *mut c_char) {
 }
 
 /// Returns true if the UTF-8 JSON buffer parses successfully with cjson-rs.
+///
+/// # Safety
+/// `ptr` must be either null or valid for reads of `len` bytes (i.e.
+/// point at a live, initialized buffer of at least `len` bytes, typically
+/// one previously returned by `wasm_alloc` and filled by the caller).
 #[no_mangle]
 pub unsafe extern "C" fn wasm_validate_json(ptr: *const u8, len: usize) -> bool {
     if ptr.is_null() {
@@ -55,6 +74,11 @@ pub unsafe extern "C" fn wasm_validate_json(ptr: *const u8, len: usize) -> bool 
 
 /// Parses UTF-8 JSON buffer and returns unformatted JSON string from Rust cjson-rs.
 /// Returns NULL if parse fails.
+///
+/// # Safety
+/// `ptr` must be either null or valid for reads of `len` bytes. The
+/// returned pointer, if non-null, is caller-owned and must be released
+/// with `wasm_free_string`.
 #[no_mangle]
 pub unsafe extern "C" fn wasm_print_unformatted(ptr: *const u8, len: usize) -> *mut c_char {
     if ptr.is_null() {
@@ -80,6 +104,11 @@ pub unsafe extern "C" fn wasm_print_unformatted(ptr: *const u8, len: usize) -> *
 
 /// Parses UTF-8 JSON buffer and returns pretty-formatted JSON string from Rust cjson-rs.
 /// Returns NULL if parse fails.
+///
+/// # Safety
+/// Same contract as `wasm_print_unformatted`: `ptr` must be null or valid
+/// for reads of `len` bytes, and the returned pointer must be released
+/// with `wasm_free_string`.
 #[no_mangle]
 pub unsafe extern "C" fn wasm_print_formatted(ptr: *const u8, len: usize) -> *mut c_char {
     if ptr.is_null() {
@@ -104,6 +133,11 @@ pub unsafe extern "C" fn wasm_print_formatted(ptr: *const u8, len: usize) -> *mu
 }
 
 /// Returns a NUL-terminated string describing the exact parse error if input is invalid.
+///
+/// # Safety
+/// `ptr` must be either null or valid for reads of `len` bytes. The
+/// returned pointer is always non-null on success and caller-owned; it
+/// must be released with `wasm_free_string`.
 #[no_mangle]
 pub unsafe extern "C" fn wasm_get_parse_error(ptr: *const u8, len: usize) -> *mut c_char {
     if ptr.is_null() {
@@ -133,6 +167,11 @@ pub unsafe extern "C" fn wasm_get_parse_error(ptr: *const u8, len: usize) -> *mu
 }
 
 /// Returns a detailed AST inspection string of the parsed JSON from cjson-rs.
+///
+/// # Safety
+/// `ptr` must be either null or valid for reads of `len` bytes. The
+/// returned pointer, if non-null, is caller-owned and must be released
+/// with `wasm_free_string`.
 #[no_mangle]
 pub unsafe extern "C" fn wasm_inspect_ast(ptr: *const u8, len: usize) -> *mut c_char {
     if ptr.is_null() {
