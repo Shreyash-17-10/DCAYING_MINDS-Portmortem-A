@@ -760,7 +760,7 @@ fn create_patches(patches: &mut Value, path: &str, from: &Value, to: &Value, cas
                 compose_patch(patches, "replace", path, None, Some(to));
             }
         }
-        (Value::String(a), Value::String(b)) | (Value::Raw(a), Value::Raw(b)) => {
+        (Value::String(a), Value::String(b)) => {
             if a != b {
                 compose_patch(patches, "replace", path, None, Some(to));
             }
@@ -809,41 +809,56 @@ fn create_patches(patches: &mut Value, path: &str, from: &Value, to: &Value, cas
 
             while fi < from_pairs.len() || ti < to_pairs.len() {
                 let diff = if fi >= from_pairs.len() {
-                    1 // from exhausted, to has extra
+                    std::cmp::Ordering::Greater // from exhausted, to has extra
                 } else if ti >= to_pairs.len() {
-                    -1 // to exhausted, from has extra
+                    std::cmp::Ordering::Less // to exhausted, from has extra
                 } else {
                     let (ref fk, _) = from_pairs[fi];
                     let (ref tk, _) = to_pairs[ti];
                     if case_sensitive {
-                        fk.cmp(tk) as i32
+                        fk.cmp(tk)
                     } else {
-                        fk.to_ascii_lowercase().cmp(&tk.to_ascii_lowercase()) as i32
+                        fk.to_ascii_lowercase().cmp(&tk.to_ascii_lowercase())
                     }
                 };
 
-                if diff == 0 {
-                    // Same key in both: recurse on value
-                    let (ref fk, ref fv) = from_pairs[fi];
-                    let (_, ref tv) = to_pairs[ti];
-                    let new_path = format!("{}/{}", path, encode_pointer_segment(fk));
-                    create_patches(patches, &new_path, fv, tv, case_sensitive);
-                    fi += 1;
-                    ti += 1;
-                } else if diff < 0 {
-                    // Key only in `from` → remove
-                    let (ref fk, _) = from_pairs[fi];
-                    compose_patch(patches, "remove", path, Some(fk), None);
-                    fi += 1;
-                } else {
-                    // Key only in `to` → add
-                    let (ref tk, ref tv) = to_pairs[ti];
-                    compose_patch(patches, "add", path, Some(tk), Some(tv));
-                    ti += 1;
+                match diff {
+                    std::cmp::Ordering::Equal => {
+                        // Same key in both: recurse on value
+                        let (ref fk, ref fv) = from_pairs[fi];
+                        let (_, ref tv) = to_pairs[ti];
+                        let new_path = format!("{}/{}", path, encode_pointer_segment(fk));
+                        create_patches(patches, &new_path, fv, tv, case_sensitive);
+                        fi += 1;
+                        ti += 1;
+                    }
+                    std::cmp::Ordering::Less => {
+                        // Key only in `from` → remove
+                        let (ref fk, _) = from_pairs[fi];
+                        compose_patch(patches, "remove", path, Some(fk), None);
+                        fi += 1;
+                    }
+                    std::cmp::Ordering::Greater => {
+                        // Key only in `to` → add
+                        let (ref tk, ref tv) = to_pairs[ti];
+                        compose_patch(patches, "add", path, Some(tk), Some(tv));
+                        ti += 1;
+                    }
                 }
             }
         }
-        // Null == Null, same-type scalars already handled above.
+        // Null == Null (no data to compare) falls here correctly.
+        // `Raw` also falls here **deliberately, faithfully reproducing a
+        // real bug in upstream** rather than fixing it: cJSON_Utils.c's
+        // create_patches has no switch case for cJSON_Raw at all - it
+        // silently falls through its `default: break;`, so two Raw values
+        // with genuinely different content produce *no* patch. Per this
+        // hackathon's Behavioral Equivalence rule ("if C has a bug, the
+        // port should have the same bug, not a silent fix"), this port
+        // reproduces that exact silent-no-patch behavior instead of
+        // correcting it. See BUG_REPORT.md for the standalone writeup of
+        // the underlying upstream bug, and DECISIONS.md §6c for the
+        // Behavioral Equivalence rationale.
         _ => {}
     }
 }
@@ -905,42 +920,50 @@ fn generate_merge_patch_inner(from: &Value, to: &Value, case_sensitive: bool) ->
                 let (ref fk, _) = from_pairs[fi];
                 let (ref tk, _) = to_pairs[ti];
                 if case_sensitive {
-                    fk.cmp(tk) as i32
+                    fk.cmp(tk)
                 } else {
-                    fk.to_ascii_lowercase().cmp(&tk.to_ascii_lowercase()) as i32
+                    fk.to_ascii_lowercase().cmp(&tk.to_ascii_lowercase())
                 }
             } else {
-                -1
+                std::cmp::Ordering::Less
             }
         } else {
-            1
+            std::cmp::Ordering::Greater
         };
 
-        if diff < 0 {
-            // Key only in `from` → patch it to null (delete)
-            let (ref fk, _) = from_pairs[fi];
-            patch.object_push(fk.clone(), Value::Null).ok();
-            fi += 1;
-        } else if diff > 0 {
-            // Key only in `to` → add it
-            let (ref tk, ref tv) = to_pairs[ti];
-            patch.object_push(tk.clone(), tv.duplicate(true)).ok();
-            ti += 1;
-        } else {
-            // Same key in both → recurse if values differ
-            let (ref fk, ref fv) = from_pairs[fi];
-            let (_, ref tv) = to_pairs[ti];
-            if !compare(fv, tv, case_sensitive) {
-                if let Some(sub_patch) = generate_merge_patch_inner(fv, tv, case_sensitive) {
-                    patch.object_push(fk.clone(), sub_patch).ok();
-                }
+        match diff {
+            std::cmp::Ordering::Less => {
+                // Key only in `from` → patch it to null (delete)
+                let (ref fk, _) = from_pairs[fi];
+                patch.object_push(fk.clone(), Value::Null).ok();
+                fi += 1;
             }
-            fi += 1;
-            ti += 1;
+            std::cmp::Ordering::Greater => {
+                // Key only in `to` → add it
+                let (ref tk, ref tv) = to_pairs[ti];
+                patch.object_push(tk.clone(), tv.duplicate(true)).ok();
+                ti += 1;
+            }
+            std::cmp::Ordering::Equal => {
+                // Same key in both → recurse if values differ
+                let (ref fk, ref fv) = from_pairs[fi];
+                let (_, ref tv) = to_pairs[ti];
+                if !compare(fv, tv, case_sensitive) {
+                    if let Some(sub_patch) = generate_merge_patch_inner(fv, tv, case_sensitive) {
+                        patch.object_push(fk.clone(), sub_patch).ok();
+                    }
+                }
+                fi += 1;
+                ti += 1;
+            }
         }
     }
 
-    if patch.as_object().is_none_or(|p| p.is_empty()) {
+    // map_or(true, ...) instead of the newer is_none_or: is_none_or was
+    // only stabilized in Rust 1.82, and this crate declares no
+    // rust-version floor requiring that - see the matching note in
+    // print.rs's repeat()/take() fix for the same underlying issue.
+    if patch.as_object().map_or(true, |p| p.is_empty()) {
         None
     } else {
         Some(patch)
@@ -1326,6 +1349,30 @@ mod patch_tests {
         assert_eq!(
             print_unformatted(&patches).unwrap(),
             r#"[{"op":"replace","path":"/a","value":"string"}]"#
+        );
+    }
+
+    #[test]
+    // Faithfully reproduces a real upstream bug (see BUG_REPORT.md):
+    // cJSON_Utils.c's create_patches has no switch case for cJSON_Raw, so
+    // it silently falls through `default: break;` and produces NO patch
+    // even when two Raw values have genuinely different content. This is
+    // a deliberate deviation from "correct" diffing behavior, kept
+    // intentionally to match upstream's actual output for Behavioral
+    // Equivalence, per this hackathon's rule that a bug in the original
+    // must be reproduced, not silently fixed.
+    fn generate_patches_raw_content_change_produces_no_patch_matching_upstream_bug() {
+        let mut a = Value::object();
+        a.object_push("r", Value::raw("[1,2]")).unwrap();
+        let mut b = Value::object();
+        b.object_push("r", Value::raw("[1,2,3]")).unwrap();
+
+        let patches = generate_patches(&a, &b);
+        assert_eq!(
+            patches,
+            Value::array(),
+            "Raw content differs but upstream's create_patches has no case for \
+             cJSON_Raw, so it must silently produce no patch, matching C exactly"
         );
     }
 
