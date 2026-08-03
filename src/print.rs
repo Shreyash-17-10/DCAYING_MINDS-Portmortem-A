@@ -107,7 +107,7 @@ fn print_object(
     let depth = depth + 1;
     for (i, (key, val)) in pairs.iter().enumerate() {
         if format {
-out.extend(std::iter::repeat_n('\t', depth));
+            out.extend(std::iter::repeat('\t').take(depth));
         }
         print_string_ptr(key, out);
         out.push(':');
@@ -123,7 +123,12 @@ out.extend(std::iter::repeat_n('\t', depth));
         }
     }
     if format {
-out.extend(std::iter::repeat_n('\t', depth - 1));
+        // std::iter::repeat(...).take(n) instead of the newer repeat_n:
+        // repeat_n was only stabilized in Rust 1.82 and this crate declares
+        // no rust-version floor requiring that, so using it made release
+        // builds fail on any older-but-still-current stable toolchain
+        // (verified: this broke a plain `cargo build --release` on 1.75).
+        out.extend(std::iter::repeat('\t').take(depth - 1));
     }
     out.push('}');
     Ok(())
