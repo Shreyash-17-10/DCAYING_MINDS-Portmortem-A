@@ -191,13 +191,16 @@ evidence of correctness in the meantime).
 ## FFI / calling from C
 
 `src/ffi.rs` exposes a small C ABI (`cjson_rs_parse`, `cjson_rs_print`,
-`cjson_rs_print_unformatted`, `cjson_rs_generate_patch`, `cjson_rs_free`,
-`cjson_rs_free_string`) —
+`cjson_rs_print_unformatted`, `cjson_rs_generate_patch`,
+`cjson_rs_generate_patches`, `cjson_rs_generate_patches_case_sensitive`,
+`cjson_rs_sort_object`, `cjson_rs_sort_object_case_sensitive`,
+`cjson_rs_free`, `cjson_rs_free_string`) —
 see `ffi_include/cjson_rs.h` for the header (hand-written; regenerate
 automatically anytime with `cbindgen --config cbindgen.toml --output
 ffi_include/cjson_rs_generated.h` if you have
-[cbindgen](https://github.com/mozilla/cbindgen) installed). This is the
-*only* file in the crate using `unsafe`.
+[cbindgen](https://github.com/mozilla/cbindgen) installed). `unsafe` in
+this crate is isolated to two files: `ffi.rs` (this C ABI) and `wasm.rs`
+(the browser GUI's WASM export surface) — every other module is safe Rust.
 
 ```bash
 cargo build --release
@@ -217,7 +220,8 @@ src/
   utils.rs   — JSON Pointer (RFC 6901), JSON Patch apply & generate (RFC 6902),
                JSON Merge Patch apply & generate (RFC 7396), object sorting
   error.rs   — CJsonError, with source position on every variant
-  ffi.rs     — C ABI shim (the only unsafe in the crate)
+  ffi.rs     — C ABI shim (unsafe, isolated and documented)
+  wasm.rs    — WASM export surface for the browser GUI (unsafe, isolated and documented)
 gui/
   index.html, app.js, style.css, wasm_bundle.js — Live WebAssembly browser GUI
 tests/
