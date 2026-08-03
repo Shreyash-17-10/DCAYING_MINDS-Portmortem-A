@@ -261,12 +261,13 @@ function-for-function.
   behavior (not a bug this port introduces), verified directly by the
   RFC 7396 §1 worked example test, which traces the exact resulting key
   order rather than asserting a guessed one.
-- No `unsafe` anywhere in this section either — the "only `unsafe` in
-  `ffi.rs`" claim from §7 still holds with Patch/Merge Patch included.
+- No `unsafe` anywhere in this section either — the "`unsafe` is isolated
+  to `ffi.rs` and `wasm.rs`" scope from §7 still holds with Patch/Merge
+  Patch included.
 
 ## 6c. JSON Patch and JSON Merge Patch — diff/generate
 
-`generate_patch`/`generate_patch_case_sensitive` (RFC 6902) and
+`generate_patches`/`generate_patches_case_sensitive` (RFC 6902) and
 `generate_merge_patch`/`generate_merge_patch_case_sensitive` (RFC 7396)
 port `create_patches`/`compose_patch` and `generate_merge_patch` from
 `cJSON_Utils.c`, function-for-function, with several decisions worth
@@ -275,23 +276,32 @@ calling out explicitly:
 - **Doesn't mutate its inputs — a deliberate divergence from upstream.**
   C's `create_patches` and `generate_merge_patch` both call `sort_object`
   on `from` and `to` **in place** before diffing, as a side effect of
-  computing the diff. A function whose job is "compare these two documents"
+  computing the diff (upstream's own header even warns about this: "NOTE:
+  This modifies objects in 'from' and 'to' by sorting the elements by
+  their key"). A function whose job is "compare these two documents"
   silently reordering the caller's object keys is surprising API behavior;
-  this port instead builds a separate sorted index
-  (`sorted_object_index`) over borrowed references and leaves `from`/`to`
-  completely untouched. Same merge-join algorithm, no side effect.
-- **Scalar-leaf comparison is consolidated, and this fixes a real gap in
-  upstream.** C hand-writes a distinct comparison per scalar type inside
-  `create_patches`'s `switch` (`compare_double` for numbers, `strcmp` for
-  strings) and has **no case at all** for `cJSON_Raw` — it silently falls
-  through an unhandled `default: break;`, meaning two `Raw` nodes with
-  different content produce *no* patch even though they're genuinely
-  different documents. This port instead reuses the existing `compare()`
-  helper (§5) uniformly for every scalar leaf type, which means Raw content
-  changes are correctly detected and patched — verified directly by
-  `raw_value_content_change_is_detected_replace`. Flagged here as a real,
-  demonstrable upstream limitation this port doesn't reproduce, not merely
-  a stylistic reorganization.
+  this port instead calls `.duplicate(true)` on `from`/`to` first and sorts
+  the *clones* (via the private `sort_object_inner`), leaving the caller's
+  original `from`/`to` completely untouched. Same merge-join algorithm,
+  no side effect on the inputs.
+- **`cJSON_Raw` content changes are faithfully un-diffed, matching a real
+  upstream bug — deliberately, not by oversight.** C's `create_patches`
+  `switch` has cases for `cJSON_Number`, `cJSON_String`, `cJSON_Array`, and
+  `cJSON_Object`, but **none for `cJSON_Raw`** — it silently falls through
+  an unhandled `default: break;`, so two `Raw` nodes with different content
+  produce *no* patch even though the documents genuinely differ. An
+  earlier version of this port used a single unified comparison helper for
+  all scalar leaf types, which incidentally fixed this and correctly
+  diffed `Raw` content. That was reverted: per this hackathon's Behavioral
+  Equivalence rule — a bug in the original C should be reproduced by the
+  port, not silently corrected — `create_patches` now matches `cJSON_Raw`
+  values without comparing their content, exactly like upstream, verified
+  by `generate_patches_raw_content_change_produces_no_patch_matching_upstream_bug`.
+  The underlying bug itself is written up separately in `BUG_REPORT.md`,
+  including a minimal repro compiled and run against the real, unmodified
+  `cJSON_Utils.c` (confirmed: prints an empty patch array for genuinely
+  different `Raw` content) — reported as a finding for the hackathon
+  organizers, not silently patched around.
 - **Array diffing's fixed-index removal, reproduced exactly.** When `from`
   is longer than `to`, C's leftover-removal loop reuses the *same* array
   index for every `remove` operation rather than incrementing it — correct
@@ -316,25 +326,66 @@ calling out explicitly:
   `generate_merge_patch_no_diff_returns_none` and
   `generate_merge_patch_to_none_means_delete_everything` as two distinct,
   separately-asserted test cases.
+- **`sort_object`/`sort_object_case_sensitive` use `Vec::sort_by`**, not
+  C's merge-sort over a doubly-linked list (`sort_list`,
+  cJSON_Utils.c:484-593). Both are stable sorts with identical ordering
+  guarantees for equal keys; `Vec::sort_by` is the Rust equivalent with
+  better cache locality and a small fraction of the code (a few lines vs.
+  ~110 lines of manual merge-sort in C). Exposed as public utilities
+  (`generate_patches`/`generate_merge_patch_*` also sort internally as part
+  of their own merge-join, via a private `sort_object_inner` — these public
+  functions exist for callers who want cJSON's `cJSONUtils_SortObject`
+  behavior directly, independent of diffing).
+- **`add_patch_to_array`** is ported as a public utility for callers who
+  want to build a JSON Patch document manually, one operation at a time,
+  rather than only via `generate_patches`' automatic diffing.
 - No `unsafe`.
 
-## 7. FFI / C ABI (`src/ffi.rs`)
+## 6d. Rust trait implementations (innovation beyond C)
 
-This is the **only** file in the crate using `unsafe`, and it's the only
-place crossing the FFI boundary at all — every other module is safe Rust
-top to bottom. This isolation was a deliberate goal from the start (the
-hackathon's "minimal `unsafe` code" bonus criterion), not an accident of
-where the FFI happened to land.
+Three standard-library traits are implemented that have no equivalent in C:
 
-- Exposes `cjson_rs_parse`, `cjson_rs_print`, `cjson_rs_print_unformatted`,
-  `cjson_rs_generate_patch`, `cjson_rs_free`, `cjson_rs_free_string` —
-  opaque handle in, owned C-string out, matching cJSON's own alloc/free
-  pairing convention (`cJSON_Print`'s result must be freed via
-  `cJSON_free`, not raw `free`; same idea here, just enforced by never
-  using libc's allocator on the Rust side of the boundary at all).
-  `cjson_rs_generate_patch` exists specifically to let a C-side
-  differential test feed a Rust-generated patch into the real upstream
-  `cJSONUtils_ApplyPatchesCaseSensitive` — see §9.
+- **`std::fmt::Display` for `Value`**: `format!("{}", value)` produces
+  compact JSON output; `format!("{:#}", value)` produces pretty-printed
+  output (with tabs and newlines, matching `cJSON_Print`'s formatting).
+  This is an ergonomic improvement that C's function-call-only interface
+  cannot express.
+- **`std::str::FromStr` for `Value`**: `let v: Value = json_str.parse()?`
+  parses JSON via Rust's standard `.parse()` idiom, returning
+  `Result<Value, CJsonError>`.
+- **`Display` and `Error` for `CJsonError` and `PatchError`**: both error
+  types implement `std::fmt::Display` and `std::error::Error`, making them
+  usable with `?`, `anyhow`, and Rust's standard error-handling ecosystem.
+  `CJsonError` also exposes a `position()` method for programmatic access
+  to the byte offset where the error was detected.
+
+## 7. FFI / C ABI (`src/ffi.rs`) and WASM bindings (`src/wasm.rs`)
+
+`unsafe` in this crate is isolated to exactly two files — `ffi.rs` (the C
+ABI, used by the differential-testing harnesses) and `wasm.rs` (the
+browser-facing GUI's WASM export surface) — both thin, carefully-bounded
+translation layers with no logic of their own; every other module is safe
+Rust top to bottom. This isolation was a deliberate goal from the start
+(the hackathon's "minimal `unsafe` code" bonus criterion). Every `unsafe
+extern "C"` function in both files carries a `# Safety` doc section stating
+its exact preconditions, not just a bare `unsafe` marker.
+
+**`src/ffi.rs`** exposes: `cjson_rs_parse`, `cjson_rs_print`,
+`cjson_rs_print_unformatted`, `cjson_rs_free`, `cjson_rs_free_string`
+(opaque handle in, owned C-string out — matching cJSON's own alloc/free
+pairing convention, `cJSON_Print`'s result must be freed via `cJSON_free`,
+not raw `free`; enforced here by never using libc's allocator on the Rust
+side of the boundary at all), plus the handle-based patch/utility surface:
+`cjson_rs_generate_patch` (case-sensitive diff between two parsed handles,
+returning a new handle), `cjson_rs_generate_patches` /
+`cjson_rs_generate_patches_case_sensitive` (the explicit case-insensitive
+and case-sensitive variants), and `cjson_rs_sort_object` /
+`cjson_rs_sort_object_case_sensitive` (mirrors `cJSONUtils_SortObject`).
+This handle-in/handle-out shape — rather than an earlier iteration that
+took/returned JSON text directly — lets a C caller chain operations
+(parse → generate_patch → print) without a text round-trip at every step,
+mirroring how cJSON's own C API composes `cJSON*` handles.
+
 - Every function NULL-checks its input and returns NULL on any failure
   (parse error, invalid UTF-8) rather than panicking across the FFI
   boundary, which would be undefined behavior in C.
@@ -345,6 +396,16 @@ where the FFI happened to land.
   (`ffi_include/smoke_test.c`) against both the static (`.a`) and dynamic
   (`.so`) build artifacts and confirmed correct parse/print round-trips
   through the actual C ABI.
+
+**`src/wasm.rs`** exposes a parallel `extern "C"` surface
+(`wasm_alloc`/`wasm_dealloc` for linear-memory buffer management,
+`wasm_validate_json`, `wasm_print_unformatted`, `wasm_print_formatted`,
+`wasm_get_parse_error`, `wasm_inspect_ast`, `wasm_get_version`) consumed
+directly by `gui/app.js` with no `wasm-bindgen`/`wasm-pack` glue — the
+browser writes UTF-8 JSON bytes into WASM linear memory via `wasm_alloc`,
+calls one of the parse/print/inspect functions with a `(ptr, len)` pair,
+and reads the C-string result back out. Same NULL-checking and
+caller-owns-the-result-until-freed discipline as `ffi.rs`.
 
 **Linting.** `cargo clippy --all-targets -- -D warnings` (deny, not just
 warn) passes clean across the entire crate — library, all four integration
@@ -544,50 +605,6 @@ algorithm itself — not divergences this port introduced.
   `misc_utils_tests.c`, `readme_examples.c` — lower priority, largely
   covered indirectly by this port's own unit tests, but not a literal
   1:1 port of those specific files.
-
-## 6c. JSON Patch generation (RFC 6902) and JSON Merge Patch generation (RFC 7396)
-
-`generate_patches`/`generate_patches_case_sensitive` and
-`generate_merge_patch`/`generate_merge_patch_case_sensitive` are ported from
-`create_patches` and `generate_merge_patch` in `cJSON_Utils.c`.
-
-- **`sort_object` uses `Vec::sort_by`**, not C's merge-sort over a
-  doubly-linked list (`sort_list`, cJSON_Utils.c:484-593). Both are stable
-  merge sorts with identical ordering guarantees; `Vec::sort_by` is the
-  Rust equivalent with better cache locality and far less code
-  (3 lines vs. 110 lines in C).
-- **Inputs are not mutated during patch generation.** C's
-  `cJSONUtils_GeneratePatches` calls `sort_object` on its `from` and `to`
-  arguments, mutating them as a side-effect (upstream's own header
-  explicitly warns: "NOTE: This modifies objects in 'from' and 'to' by
-  sorting the elements by their key"). This Rust version works on clones
-  of the sorted data instead, avoiding the surprising mutation — a
-  deliberate, documented improvement over C's interface contract.
-- **`generate_merge_patch` returns `Option<Value>`** instead of C's
-  nullable pointer. `None` maps to C's `NULL` return ("no patch needed,
-  documents are identical"), `Some(patch)` maps to C's non-NULL return.
-- **`add_patch_to_array`** is ported as a public utility for callers who
-  want to build patch arrays manually.
-- No `unsafe` in any of the above — the "only `unsafe` in `ffi.rs`"
-  invariant continues to hold.
-
-## 7. Rust trait implementations (innovation beyond C)
-
-Three standard-library traits are implemented that have no equivalent in C:
-
-- **`std::fmt::Display` for `Value`**: `format!("{}", value)` produces
-  compact JSON output; `format!("{:#}", value)` produces pretty-printed
-  output (with tabs and newlines, matching `cJSON_Print`'s formatting).
-  This is an ergonomic improvement that C's function-call-only interface
-  cannot express.
-- **`std::str::FromStr` for `Value`**: `let v: Value = json_str.parse()?`
-  parses JSON via Rust's standard `.parse()` idiom, returning
-  `Result<Value, CJsonError>`.
-- **`Display` and `Error` for `CJsonError` and `PatchError`**: both error
-  types implement `std::fmt::Display` and `std::error::Error`, making them
-  usable with `?`, `anyhow`, and Rust's standard error-handling ecosystem.
-  `CJsonError` also exposes a `position()` method for programmatic access
-  to the byte offset where the error was detected.
 
 ## 11. Summary of intentional behavioral differences from upstream
 
