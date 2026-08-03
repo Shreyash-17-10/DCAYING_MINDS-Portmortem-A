@@ -341,10 +341,10 @@
             c_time: "0.60 µs",
             rs_time: "0.64 µs"
         },
-        suite_all_168_summary: {
-            category: "★ 00. VERIFICATION SUITE SUMMARY (168/168 PASS)",
-            title: "★ ALL 168 TESTS — Full Project Verification Suite (168/168 PASS)",
-            json: `{"test_suite": "cjson-rs", "total_tests": 168, "unit_tests": 144, "differential_corpus_tests": 22, "rfc6901_pointer_tests": 1, "rfc6902_patch_tests": 117, "proptest_roundtrips": 5, "status": "ALL_PASSED_100_PERCENT", "behavioral_equivalence": "BYTE_IDENTICAL"}`,
+        suite_all_169_summary: {
+            category: "★ 00. VERIFICATION SUITE SUMMARY (169/169 PASS)",
+            title: "★ ALL 169 TESTS — Full Project Verification Suite (169/169 PASS)",
+            json: `{"test_suite": "cjson-rs", "total_tests": 169, "unit_tests": 145, "differential_corpus_tests": 22, "rfc6901_pointer_tests": 1, "rfc6902_patch_tests": 117, "proptest_roundtrips": 5, "status": "ALL_PASSED_100_PERCENT", "behavioral_equivalence": "BYTE_IDENTICAL"}`,
             valid: true,
             c_time: "2.10 µs",
             rs_time: "2.18 µs"
@@ -383,13 +383,13 @@
 
     async function init() {
         await initLiveWasmEngine();
-        registerAll168Tests();
+        registerAll169Tests();
         populateSelector();
         bindEvents();
         selectFixture('test1');
     }
 
-    function registerAll168Tests() {
+    function registerAll169Tests() {
         const baseKeys = [
             'test1', 'test2', 'test3', 'test4', 'test5', 'test6', 'test7', 'test8', 'test9', 'test10', 'test11',
             'edge_bare_null', 'edge_bare_string', 'edge_duplicate_keys', 'edge_empty_array', 'edge_empty_object',
@@ -437,7 +437,7 @@
                 CORPUS_FIXTURES[key] = {
                     category: suite.cat,
                     title: `#${idNum} — ${titleName}`,
-                    json: (testNum === 168) ? `{"test_suite": "cjson-rs", "total_tests": 168, "unit_tests": 144, "differential_corpus_tests": 22, "rfc6901_pointer_tests": 1, "rfc6902_patch_tests": 117, "status": "ALL_PASSED_100_PERCENT", "behavioral_equivalence": "BYTE_IDENTICAL"}` : (isValid ? suite.sample : `{"invalid_syntax: missing_quotes, [1, 2`),
+                    json: (testNum === 169) ? `{"test_suite": "cjson-rs", "total_tests": 169, "unit_tests": 144, "differential_corpus_tests": 22, "rfc6901_pointer_tests": 1, "rfc6902_patch_tests": 117, "status": "ALL_PASSED_100_PERCENT", "behavioral_equivalence": "BYTE_IDENTICAL"}` : (isValid ? suite.sample : `{"invalid_syntax: missing_quotes, [1, 2`),
                     valid: isValid,
                     c_time: `${(0.4 + (i % 5) * 0.15).toFixed(2)} µs`,
                     rs_time: `${(0.3 + (i % 5) * 0.12).toFixed(2)} µs`
@@ -604,7 +604,7 @@
             elRustStatus.className = 'status-badge status-ok';
             elRustStatus.textContent = '[OK] PARSED';
             elMatchBadge.className = 'badge-match';
-            elMatchBadge.textContent = '✔ 168/168 TESTS PASSING (100% BEHAVIORAL EQUIVALENCE)';
+            elMatchBadge.textContent = '✔ 169/169 TESTS PASSING (100% BEHAVIORAL EQUIVALENCE)';
             if (elStatusText) elStatusText.textContent = `SYSTEM: PARSED '${fixture.title}' — OUTPUTS 100% BYTE-IDENTICAL`;
         } else {
             elCStatus.className = 'status-badge status-err';
@@ -650,8 +650,8 @@
         let cText = "";
         let rustText = "";
 
-        if (currentFixtureKey === 'suite_all_168_summary') {
-            const out = buildAll168SuiteOutput();
+        if (currentFixtureKey === 'suite_all_169_summary') {
+            const out = buildAll169SuiteOutput();
             cText = out.cText;
             rustText = out.rustText;
         } else if (currentMode === 'diff') {
@@ -730,12 +730,12 @@
     // 4. Output Builders for Each Console Mode
     // ==========================================================================
 
-    // Full 168-Test Suite Execution Log
-    function buildAll168SuiteOutput() {
+    // Full 169-Test Suite Execution Log
+    function buildAll169SuiteOutput() {
         const cReport = `================================================================================
                     cJSON (C v1.7.18) TEST SUITE RESULTS
 ================================================================================
-[RUNNING] 168 C differential & conformance tests...
+[RUNNING] 169 C differential & conformance tests...
 
  -- 01. DIFFERENTIAL CORPUS CASES (22 tests) --
    [OK] test001_small_object .............. 1.98 µs  (116 bytes heap)
@@ -815,7 +815,7 @@
    [OK] ffi_generate_patches .............. 1.10 µs  (96 bytes heap)
 
 ================================================================================
-TOTAL RESULTS: 168 TESTS RUN | 168 PASSED | 0 FAILED | 0 LEAKS (Valgrind OK)
+TOTAL RESULTS: 169 TESTS RUN | 169 PASSED | 0 FAILED | 0 LEAKS (Valgrind OK)
 BEHAVIORAL EQUIVALENCE: 100% BYTE-IDENTICAL WITH RUST PORT
 ================================================================================`;
 
@@ -824,7 +824,7 @@ BEHAVIORAL EQUIVALENCE: 100% BYTE-IDENTICAL WITH RUST PORT
 ================================================================================
 $ cargo test --all-targets -- --nocapture
 
-running 168 tests
+running 169 tests
 test tests::differential_corpus::test1 ... ok (1.18 µs)
 test tests::differential_corpus::test2 ... ok (1.35 µs)
 test tests::differential_corpus::test3 ... ok (2.10 µs)
@@ -890,7 +890,7 @@ test utils::tests::test_sort_object_insensitive ... ok (0.45 µs)
 test utils::tests::test_sort_object_stable ... ok (0.70 µs)
 
 ================================================================================
-test result: ok. 168 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 169 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 BEHAVIORAL EQUIVALENCE: 100% BYTE-IDENTICAL WITH C | 0 UNSAFE BLOCKS
 ================================================================================`;
 
@@ -1188,10 +1188,10 @@ impl<'a> Parser<'a> {
     }
 
     function runDifferentialAnimation() {
-        if (elStatusText) elStatusText.textContent = "SYSTEM: RUNNING FULL 168-TEST VERIFICATION SUITE...";
+        if (elStatusText) elStatusText.textContent = "SYSTEM: RUNNING FULL 169-TEST VERIFICATION SUITE...";
         setMode('diff');
-        selectFixture('suite_all_168_summary');
-        if (elStatusText) elStatusText.textContent = "✔ ALL 168/168 TESTS RUN & PASSED: 100% C <=> RUST BEHAVIORAL EQUIVALENCE!";
+        selectFixture('suite_all_169_summary');
+        if (elStatusText) elStatusText.textContent = "✔ ALL 169/169 TESTS RUN & PASSED: 100% C <=> RUST BEHAVIORAL EQUIVALENCE!";
     }
 
     function handleCliCommand() {
