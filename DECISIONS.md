@@ -551,7 +551,7 @@ algorithm itself — not divergences this port introduced.
 
 ## 10. Test suite (`tests/`)
 
-- **168 tests total** at last count: 144 unit tests co-located with the
+- **169 tests total** at last count: 144 unit tests co-located with the
   modules they test (`src/*.rs`, `#[cfg(test)]` — including
   `utils::patch_tests` and `utils::generate_tests` for §6b/§6c,
   `ffi::tests` for the `cjson_rs_generate_patch` export, and
